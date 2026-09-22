@@ -1,0 +1,368 @@
+<!--
+  Geldik Mi?
+  Copyright (c) 2026 Onur Teryakioğlu. Tüm hakları saklıdır.
+  Bu dosya Onur Teryakioğlu'nun yazılı izni olmadan kopyalanamaz,
+  değiştirilemez, dağıtılamaz veya ticari amaçla kullanılamaz.
+-->
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Geldik Mi? — Durağını Kaçırma</title>
+<meta name="description" content="Toplu taşımada durağını kaçırmamanı sağlayan, dünyanın her yerinde kullanılabilen konum alarmı uygulaması.">
+<meta name="theme-color" content="#1A2340">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Geldik Mi?">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============ ÖZGÜN İKON SETİ (emoji yerine, tek seferlik gömülü sprite) ============ -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-7.58-7-12a7 7 0 0 1 14 0c0 4.42-7 12-7 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="9" r="2.6" fill="currentColor"/></symbol>
+    <symbol id="i-battery" viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="19.5" y="10" width="1.8" height="4" rx="0.8" fill="currentColor"/><path d="M13 10l-3.2 4.4h2.4L11 18l3.6-4.8h-2.3L13 10z" fill="currentColor"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8.2a6 6 0 1 1 12 0c0 3.8 1.3 5.3 1.5 5.6.15.18.02.45-.22.45H4.72c-.24 0-.37-.27-.22-.45C4.7 13.5 6 12 6 8.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.3 17a2.7 2.7 0 0 0 5.4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.2A8.2 8.2 0 1 1 9.8 4 6.8 6.8 0 0 0 20 14.2z" fill="currentColor"/><circle cx="17.2" cy="6.5" r="0.9" fill="currentColor"/><circle cx="19" cy="10" r="0.6" fill="currentColor"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.6l2.53 5.15 5.68.83-4.11 4 .97 5.66L12 16.5l-5.07 2.74.97-5.66-4.11-4 5.68-.83L12 3.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+    <symbol id="i-star-filled" viewBox="0 0 24 24"><path d="M12 3.6l2.53 5.15 5.68.83-4.11 4 .97 5.66L12 16.5l-5.07 2.74.97-5.66-4.11-4 5.68-.83L12 3.6z" fill="currentColor"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 3.2 3.3 5.1v15.7L9 18.9l6 1.9 5.7-1.9V2.9L15 4.9 9 3v.2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 3.2v15.7M15 4.9v15.9" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12.5" r="8.3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v4.6l3.2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 2.3h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.8"/><g fill="currentColor"><rect x="11" y="1.6" width="2" height="3.6" rx="1"/><rect x="11" y="18.8" width="2" height="3.6" rx="1"/><rect x="11" y="1.6" width="2" height="3.6" rx="1" transform="rotate(45 12 12)"/><rect x="11" y="18.8" width="2" height="3.6" rx="1" transform="rotate(45 12 12)"/><rect x="11" y="1.6" width="2" height="3.6" rx="1" transform="rotate(90 12 12)"/><rect x="11" y="18.8" width="2" height="3.6" rx="1" transform="rotate(90 12 12)"/><rect x="11" y="1.6" width="2" height="3.6" rx="1" transform="rotate(135 12 12)"/><rect x="11" y="18.8" width="2" height="3.6" rx="1" transform="rotate(135 12 12)"/></g></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="7.8" r="1.15" fill="currentColor"/><rect x="11" y="10.6" width="2" height="6.4" rx="1" fill="currentColor"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.3v3M12 18.7v3M2.3 12h3M18.7 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-train" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="13" rx="4" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="7.3" y="6" width="4" height="4" rx="0.8" fill="currentColor"/><rect x="12.7" y="6" width="4" height="4" rx="0.8" fill="currentColor"/><circle cx="8.2" cy="19.2" r="1.3" fill="currentColor"/><circle cx="15.8" cy="19.2" r="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-subway" viewBox="0 0 24 24"><path d="M5 10a7 7 0 0 1 14 0v6.5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V10z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="9" cy="9.8" r="1.3" fill="currentColor"/><circle cx="12" cy="9.8" r="1.3" fill="currentColor"/><circle cx="15" cy="9.8" r="1.3" fill="currentColor"/><circle cx="8.2" cy="19.4" r="1.2" fill="currentColor"/><circle cx="15.8" cy="19.4" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-bus" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="10.5" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="5.5" y="7.6" width="3.6" height="3" rx="0.6" fill="currentColor"/><rect x="10.2" y="7.6" width="3.6" height="3" rx="0.6" fill="currentColor"/><rect x="14.9" y="7.6" width="3.6" height="3" rx="0.6" fill="currentColor"/><circle cx="7.5" cy="18.3" r="1.4" fill="currentColor"/><circle cx="16.5" cy="18.3" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-ferry" viewBox="0 0 24 24"><path d="M4 15.5l1.8 4.3h12.4l1.8-4.3H4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M7 15.5V8h7l3 4.3v3.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M11 8V3.5h4L14 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9.5v5h3.4l5 3.6V5.9l-5 3.6H4z" fill="currentColor"/><path d="M15.8 9.3a4 4 0 0 1 0 5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18.3 6.9a7.6 7.6 0 0 1 0 10.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-vibration" viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 16.2h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4.3 8.5v7M2 10.3v3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M19.7 8.5v7M22 10.3v3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-flash" viewBox="0 0 24 24"><path d="M13.2 2 4.4 13.8h5.6l-1 8.2 9.6-13h-6l1.2-7z" fill="currentColor"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 24 24"><rect x="3" y="14" width="3" height="7" rx="1" fill="currentColor"/><rect x="8.5" y="10.5" width="3" height="10.5" rx="1" fill="currentColor"/><rect x="14" y="6.5" width="3" height="14.5" rx="1" fill="currentColor" opacity=".55"/><rect x="19.5" y="3" width="3" height="18" rx="1" fill="currentColor" opacity=".3"/></symbol>
+    <symbol id="i-party" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6" fill="currentColor"/><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3.5v2.6"/><path d="M12 17.9v2.6"/><path d="M3.5 12h2.6"/><path d="M17.9 12h2.6"/><path d="M6.2 6.2l1.8 1.8"/><path d="M16 16l1.8 1.8"/><path d="M17.8 6.2L16 8"/><path d="M8 16l-1.8 1.8"/></g><rect x="19" y="2.2" width="2.4" height="2.4" rx="0.5" fill="currentColor" transform="rotate(20 20 3)"/><rect x="1.6" y="18.4" width="2.4" height="2.4" rx="0.5" fill="currentColor" transform="rotate(-15 3 20)"/><rect x="2" y="3" width="2" height="2" rx="0.5" fill="currentColor" transform="rotate(35 3 4)"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 4.5l-8 7.5 8 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M4 12h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5.5 5.5L20 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  </defs>
+</svg>
+
+<!-- ============ SPLASH ============ -->
+<section id="view-splash" class="view active">
+  <div class="splash-content">
+    <div class="splash-logo" aria-hidden="true">
+      <svg viewBox="0 0 120 120" width="88" height="88">
+        <circle cx="60" cy="60" r="56" fill="#FF6B00"/>
+        <path d="M60 22c-14.36 0-26 11.64-26 26 0 19.5 26 50 26 50s26-30.5 26-50c0-14.36-11.64-26-26-26z" fill="#fff"/>
+        <circle cx="60" cy="48" r="11" fill="#1A2340"/>
+        <text x="60" y="52" text-anchor="middle" font-size="12" fill="#FF6B00" font-family="Lexend, sans-serif" font-weight="700">zZz</text>
+      </svg>
+    </div>
+    <h1 class="splash-title" data-i18n="app_name">Geldik Mi?</h1>
+    <p class="splash-tagline" data-i18n="splash_tagline">Durağını kaçırma, sen uyu — biz uyandıralım.</p>
+    <div class="splash-spinner" aria-hidden="true"></div>
+    <div class="splash-credits" id="splash-credits">
+      <div class="credits-track">
+        <p class="credit-line" data-i18n="credit_made_in">Türkiye'de tasarlandı ve geliştirildi</p>
+        <p class="credit-line credit-strong" data-i18n="credit_made_by">Onur Teryakioğlu tarafından</p>
+        <p class="credit-line" data-i18n="credit_rights">Tüm hakları saklıdır</p>
+        <p class="credit-line credit-dim" data-i18n="credit_copyright">© 2026 Geldik Mi?</p>
+      </div>
+    </div>
+    <p class="splash-skip-hint" data-i18n="tap_to_skip">Geçmek için dokun</p>
+  </div>
+</section>
+
+<!-- ============ ONBOARDING (izin tanıtımı) ============ -->
+<section id="view-onboarding" class="view">
+  <button class="btn-skip-top" id="btn-onboarding-skip" type="button"><span data-i18n="skip_all">Hepsini Geç</span> ›</button>
+  <div class="onboarding-track" id="onboarding-track">
+
+    <div class="onboarding-slide active">
+      <div class="ob-icon"><svg width="56" height="56"><use href="#i-pin"/></svg></div>
+      <h2 data-i18n="ob1_title">Konumuna ihtiyacımız var</h2>
+      <p data-i18n="ob1_text">Durağına yaklaştığını anlayabilmemiz için konum iznine ihtiyaç duyuyoruz. Bu bilgi asla cihazının dışına çıkmaz.</p>
+      <button class="btn-primary ob-permission-btn" id="btn-ask-location" type="button">
+        <span data-i18n="ob1_btn">Konum İzni Ver</span>
+      </button>
+      <p class="ob-permission-status" id="status-location"></p>
+    </div>
+
+    <div class="onboarding-slide">
+      <div class="ob-icon"><svg width="56" height="56"><use href="#i-battery"/></svg></div>
+      <h2 data-i18n="ob2_title">Ekran kapalıyken de çalışırız</h2>
+      <p data-i18n="ob2_text">Telefonu cebine koyup uyuyabilmen için, uygulama açık kaldığı sürece arka planda konumunu takip ederiz. Pil dostu, akıllı takip kullanırız.</p>
+    </div>
+
+    <div class="onboarding-slide">
+      <div class="ob-icon"><svg width="56" height="56"><use href="#i-bell"/></svg></div>
+      <h2 data-i18n="ob3_title">Bildirimlere izin ver</h2>
+      <p data-i18n="ob3_text">Uyuyor olsan bile seni uyandırabilmemiz için ses, titreşim ve bildirim izinlerini açık tutmanı öneririz.</p>
+      <button class="btn-primary ob-permission-btn" id="btn-ask-notification" type="button">
+        <span data-i18n="ob3_btn">Bildirim İzni Ver</span>
+      </button>
+      <p class="ob-permission-status" id="status-notification"></p>
+    </div>
+
+    <div class="onboarding-slide">
+      <div class="ob-icon"><svg width="56" height="56"><use href="#i-moon"/></svg></div>
+      <h2 data-i18n="ob4_title">Hazırsın!</h2>
+      <p data-i18n="ob4_text">Şimdi sana haritayı kısaca gezdirelim. Adım adım nereye dokunacağını oklarla göstereceğiz.</p>
+      <button class="btn-primary" id="btn-onboarding-start" type="button"><span data-i18n="ob4_btn">Haritayı Göster</span></button>
+    </div>
+
+  </div>
+  <div class="onboarding-dots" id="onboarding-dots"></div>
+  <div class="onboarding-nav">
+    <button class="btn-ghost" id="btn-onboarding-prev" type="button"><span data-i18n="back">Geri</span></button>
+    <button class="btn-primary" id="btn-onboarding-next" type="button"><span data-i18n="next">İleri</span></button>
+  </div>
+</section>
+
+<!-- ============ ANA EKRAN — HARİTA ============ -->
+<section id="view-map" class="view">
+  <div class="topbar">
+    <div class="searchbar" id="searchbar-wrap">
+      <svg width="20" height="20"><use href="#i-search"/></svg>
+      <input type="text" id="search-input" data-i18n-ph="search_placeholder" placeholder="Nereye gidiyorsun? Durak veya yer ara…" autocomplete="off">
+      <button id="btn-clear-search" class="icon-btn hidden" type="button" aria-label="Temizle"><svg width="14" height="14"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="search-results" class="search-results hidden"></div>
+  </div>
+
+  <div id="map" data-tour="map"></div>
+
+  <div class="zoom-ctrl" data-tour="zoom">
+    <button id="btn-zoom-in" type="button" aria-label="Yakınlaştır"><svg width="20" height="20"><use href="#i-plus"/></svg></button>
+    <button id="btn-zoom-out" type="button" aria-label="Uzaklaştır"><svg width="20" height="20"><use href="#i-minus"/></svg></button>
+  </div>
+
+  <button id="btn-locate" class="fab" data-tour="locate" type="button" aria-label="Konumuma git">
+    <svg width="22" height="22"><use href="#i-locate"/></svg>
+  </button>
+
+  <button id="btn-lines" class="fab fab-left" data-tour="lines" type="button" aria-label="Yakındaki toplu taşıma hatları">
+    <svg width="22" height="22"><use href="#i-subway"/></svg>
+  </button>
+
+  <div class="quick-shortcuts" data-tour="shortcuts">
+    <button class="chip" id="btn-show-recents" type="button"><svg width="15" height="15"><use href="#i-clock"/></svg> <span data-i18n="recents">Son Kullanılanlar</span></button>
+    <button class="chip" id="btn-show-favorites" type="button"><svg width="15" height="15"><use href="#i-star-filled"/></svg> <span data-i18n="favorites">Favoriler</span></button>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-view="map" type="button"><svg width="21" height="21"><use href="#i-map"/></svg><span data-i18n="nav_map">Harita</span></button>
+    <button class="nav-item" data-view="favorites" type="button"><svg width="21" height="21"><use href="#i-star"/></svg><span data-i18n="nav_favorites">Favoriler</span></button>
+    <button class="nav-item" data-view="history" type="button"><svg width="21" height="21"><use href="#i-clock"/></svg><span data-i18n="nav_history">Geçmiş</span></button>
+    <button class="nav-item" data-view="settings" type="button"><svg width="21" height="21"><use href="#i-settings"/></svg><span data-i18n="nav_settings">Ayarlar</span></button>
+  </nav>
+</section>
+
+<!-- ============ HEDEF AYAR PANELİ (bottom sheet) ============ -->
+<div id="sheet-overlay" class="sheet-overlay hidden"></div>
+<section id="sheet-target" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="sheet-row">
+      <input type="text" id="target-name" class="target-name-input" data-i18n-ph="target_name_placeholder" placeholder="Hedefin adı (örn. Evin durağı)">
+      <button id="btn-fav-toggle" class="icon-btn star-btn" type="button" aria-label="Favorilere ekle"><svg width="20" height="20"><use href="#i-star"/></svg></button>
+    </div>
+    <p class="target-address" id="target-address" data-i18n="address_loading">Adres bulunuyor…</p>
+    <p class="underground-hint hidden" id="underground-hint"><svg width="15" height="15"><use href="#i-subway"/></svg> <span data-i18n="underground_hint">Yeraltı hattı — en az 1 km uyarı mesafesi önerilir.</span></p>
+
+    <div class="radius-section" data-tour="radius">
+      <div class="radius-label-row">
+        <span data-i18n="radius_label">Uyarı mesafesi</span>
+        <strong id="radius-value">500 m</strong>
+      </div>
+      <input type="range" id="radius-slider" min="100" max="10000" step="50" value="500">
+      <div class="radius-presets">
+        <button class="chip chip-sm" data-radius="200" type="button">200 m</button>
+        <button class="chip chip-sm" data-radius="500" type="button">500 m</button>
+        <button class="chip chip-sm" data-radius="1000" type="button">1 km</button>
+        <button class="chip chip-sm" data-radius="2000" type="button">2 km</button>
+        <button class="chip chip-sm" data-radius="5000" type="button">5 km</button>
+      </div>
+    </div>
+
+    <div class="alarm-toggles">
+      <label class="toggle-row"><span><svg width="16" height="16"><use href="#i-sound"/></svg> <span data-i18n="sound">Ses</span></span><input type="checkbox" id="toggle-sound" checked></label>
+      <label class="toggle-row"><span><svg width="16" height="16"><use href="#i-vibration"/></svg> <span data-i18n="vibration">Titreşim</span></span><input type="checkbox" id="toggle-vibration" checked></label>
+      <label class="toggle-row"><span><svg width="16" height="16"><use href="#i-flash"/></svg> <span data-i18n="flash">Ekran yanıp sönme</span></span><input type="checkbox" id="toggle-flash" checked></label>
+    </div>
+
+    <button class="btn-primary btn-big" id="btn-start-trip" data-tour="start" type="button"><span data-i18n="start_trip">Yolculuğu Başlat</span></button>
+    <button class="btn-ghost" id="btn-sheet-close" type="button"><span data-i18n="cancel_sheet">Vazgeç</span></button>
+  </div>
+</section>
+
+<!-- ============ YAKINDAKI HATLAR PANELİ ============ -->
+<div id="lines-overlay" class="sheet-overlay hidden"></div>
+<section id="sheet-lines" class="bottom-sheet lines-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="lines-header">
+      <button id="btn-lines-back" class="icon-btn hidden" type="button" aria-label="Geri"><svg width="18" height="18"><use href="#i-chevron-left"/></svg></button>
+      <h3 id="lines-title" data-i18n="lines_title">Yakındaki Hatlar</h3>
+      <button id="btn-lines-close" class="icon-btn" type="button" aria-label="Kapat"><svg width="16" height="16"><use href="#i-close"/></svg></button>
+    </div>
+    <p class="lines-hint" id="lines-hint" data-i18n="lines_hint">Konumuna yakın raylı sistem/tramvay hatları — OpenStreetMap verisinden, dünyanın her yerinde otomatik bulunur.</p>
+    <div id="lines-content" class="lines-content"></div>
+  </div>
+</section>
+
+<!-- ============ AKTİF YOLCULUK ============ -->
+<section id="view-trip" class="view">
+  <div id="map-trip"></div>
+  <div class="trip-banner" id="trip-signal-banner"><svg width="15" height="15"><use href="#i-signal"/></svg> <span data-i18n="signal_weak">Sinyal zayıf — son bilinen hız ile tahmini konum kullanılıyor</span></div>
+  <div class="trip-card">
+    <p class="trip-target-name" id="trip-target-name">Hedef</p>
+    <p class="trip-remaining" id="trip-remaining">— </p>
+    <p class="trip-eta" id="trip-eta"></p>
+    <p class="trip-hint" data-i18n="trip_hint">Ekranı kapatabilirsin, telefonu cebine koyabilirsin. Uygulamayı kapatma — arka planda takip edebilmemiz için açık kalması gerekir.</p>
+    <button class="btn-danger-outline" id="btn-cancel-trip" type="button"><span data-i18n="trip_cancel">Yolculuğu İptal Et</span></button>
+  </div>
+</section>
+
+<!-- ============ ALARM EKRANI ============ -->
+<section id="view-alarm" class="view alarm-view">
+  <div class="alarm-flash" id="alarm-flash"></div>
+  <div class="alarm-content">
+    <div class="alarm-icon"><svg width="64" height="64"><use href="#i-party"/></svg></div>
+    <h1 class="alarm-title" data-i18n="alarm_title">GELDİK!</h1>
+    <p class="alarm-sub" id="alarm-sub" data-i18n="alarm_default_sub">Hedefe yaklaştın</p>
+    <div class="swipe-confirm" id="swipe-confirm">
+      <div class="swipe-track">
+        <div class="swipe-thumb" id="swipe-thumb"><svg width="22" height="22"><use href="#i-chevron-left" style="transform:rotate(180deg)"/></svg></div>
+        <span class="swipe-label" data-i18n="swipe_label">Kaydırarak "Uyandım" de</span>
+      </div>
+    </div>
+    <button class="btn-ghost alarm-snooze" id="btn-snooze" type="button"><span data-i18n="snooze">5 dk ertele</span></button>
+  </div>
+</section>
+
+<!-- ============ FAVORİLER ============ -->
+<section id="view-favorites" class="view">
+  <header class="page-header"><button class="btn-back" data-back="map" type="button"><svg width="22" height="22"><use href="#i-chevron-left"/></svg></button><svg width="19" height="19"><use href="#i-star-filled"/></svg><h2 data-i18n="favorites">Favoriler</h2></header>
+  <div class="list-container" id="favorites-list"><p class="empty-state" data-i18n="fav_empty">Henüz favori eklemedin. Bir hedef seçip yıldız ikonuna dokun.</p></div>
+</section>
+
+<!-- ============ GEÇMİŞ ============ -->
+<section id="view-history" class="view">
+  <header class="page-header"><button class="btn-back" data-back="map" type="button"><svg width="22" height="22"><use href="#i-chevron-left"/></svg></button><svg width="19" height="19"><use href="#i-clock"/></svg><h2 data-i18n="nav_history">Geçmiş</h2></header>
+  <div class="list-container" id="history-list"><p class="empty-state" data-i18n="history_empty">Henüz bir yolculuğun yok.</p></div>
+</section>
+
+<!-- ============ AYARLAR ============ -->
+<section id="view-settings" class="view">
+  <header class="page-header"><button class="btn-back" data-back="map" type="button"><svg width="22" height="22"><use href="#i-chevron-left"/></svg></button><svg width="19" height="19"><use href="#i-settings"/></svg><h2 data-i18n="nav_settings">Ayarlar</h2></header>
+  <div class="list-container settings-list">
+    <div class="settings-group">
+      <label class="settings-item">
+        <span data-i18n="settings_lang">Dil</span>
+        <select id="setting-lang">
+          <option value="tr">Türkçe</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <label class="settings-item">
+        <span data-i18n="settings_default_radius">Varsayılan uyarı mesafesi</span>
+        <select id="setting-default-radius">
+          <option value="200">200 m</option>
+          <option value="500" selected>500 m</option>
+          <option value="1000">1 km</option>
+          <option value="2000">2 km</option>
+          <option value="5000">5 km</option>
+        </select>
+      </label>
+      <label class="settings-item">
+        <span data-i18n="settings_unit">Birim</span>
+        <select id="setting-unit">
+          <option value="auto" data-i18n="settings_unit_auto">Otomatik (m/km)</option>
+          <option value="m" data-i18n="settings_unit_m">Metre</option>
+          <option value="km" data-i18n="settings_unit_km">Kilometre</option>
+        </select>
+      </label>
+      <label class="settings-item">
+        <span data-i18n="settings_theme">Tema</span>
+        <select id="setting-theme">
+          <option value="system" data-i18n="settings_theme_system">Sistem</option>
+          <option value="light" data-i18n="settings_theme_light">Açık</option>
+          <option value="dark" data-i18n="settings_theme_dark">Koyu</option>
+        </select>
+      </label>
+      <label class="settings-item">
+        <span data-i18n="settings_default_sound">Varsayılan ses</span>
+        <input type="checkbox" id="setting-sound" checked>
+      </label>
+      <label class="settings-item">
+        <span data-i18n="settings_default_vibration">Varsayılan titreşim</span>
+        <input type="checkbox" id="setting-vibration" checked>
+      </label>
+      <label class="settings-item">
+        <span data-i18n="settings_default_flash">Varsayılan ekran yanıp sönme</span>
+        <input type="checkbox" id="setting-flash" checked>
+      </label>
+    </div>
+    <div class="settings-group">
+      <button class="settings-item settings-link" id="btn-replay-tour" type="button">
+        <span><svg width="16" height="16"><use href="#i-map"/></svg> <span data-i18n="settings_replay_tour">Kullanım turunu tekrar oynat</span></span><span>›</span>
+      </button>
+      <button class="settings-item settings-link" id="btn-open-about" type="button">
+        <span><svg width="16" height="16"><use href="#i-info"/></svg> <span data-i18n="settings_about">Hakkında</span></span><span>›</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HAKKINDA ============ -->
+<section id="view-about" class="view">
+  <header class="page-header"><button class="btn-back" data-back="settings" type="button"><svg width="22" height="22"><use href="#i-chevron-left"/></svg></button><svg width="19" height="19"><use href="#i-info"/></svg><h2 data-i18n="settings_about">Hakkında</h2></header>
+  <div class="list-container about-content">
+    <div class="about-logo">
+      <svg viewBox="0 0 120 120" width="64" height="64"><circle cx="60" cy="60" r="56" fill="#FF6B00"/><path d="M60 22c-14.36 0-26 11.64-26 26 0 19.5 26 50 26 50s26-30.5 26-50c0-14.36-11.64-26-26-26z" fill="#fff"/><circle cx="60" cy="48" r="11" fill="#1A2340"/></svg>
+    </div>
+    <h3 data-i18n="app_name">Geldik Mi?</h3>
+    <p class="about-version"><span data-i18n="version">Sürüm</span> 1.0.0</p>
+    <p data-i18n="about_desc">Toplu taşımada yolculuk yapan kişinin ineceği durağı kaçırmamasını sağlayan bir konum alarmı uygulamasıdır.</p>
+    <h4 data-i18n="about_privacy_title">Gizlilik</h4>
+    <p data-i18n="about_privacy_text">Konum verin yalnızca cihazında işlenir; hiçbir sunucuya gönderilmez.</p>
+    <h4 data-i18n="about_copyright_title">Telif Hakkı</h4>
+    <p>© 2026 Onur Teryakioğlu. <span data-i18n="credit_rights">Tüm hakları saklıdır</span>.</p>
+    <p class="about-legal" data-i18n="about_legal">Bu yazılımın kaynak kodu, tasarımı, arayüzü, uygulama adı ve logosu Onur Teryakioğlu'nun mülkiyetindedir.</p>
+    <p class="about-attrib" data-i18n="about_attrib">Harita verileri © OpenStreetMap katkıcıları</p>
+  </div>
+</section>
+
+<!-- ============ TUR (coach-mark) KATMANI ============ -->
+<div id="tour-layer" class="tour-layer hidden">
+  <button class="btn-skip-top" id="btn-tour-skip" type="button"><span data-i18n="skip_all">Hepsini Geç</span> ›</button>
+  <div id="tour-arrow" class="tour-arrow"></div>
+  <div class="tour-tooltip" id="tour-tooltip">
+    <p id="tour-tooltip-text"></p>
+    <div class="tour-tooltip-nav">
+      <span class="tour-step-count" id="tour-step-count"></span>
+      <button class="btn-primary btn-sm" id="btn-tour-next" type="button"><span data-i18n="next">İleri</span></button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/stops-data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
