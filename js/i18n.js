@@ -118,11 +118,13 @@ const I18N = {
     lines_title: "Yakındaki Hatlar",
     lines_hint: "Konumuna yakın raylı sistem/tramvay hatları — OpenStreetMap verisinden, dünyanın her yerinde otomatik bulunur.",
     lines_loading: "Yakındaki hatlar aranıyor…",
+    lines_loading_slow: "Bu biraz uzun sürüyor, ücretsiz servis yoğun olabilir — lütfen bekle…",
     lines_empty: "Bu bölgede raylı sistem hattı bulunamadı. Yine de arama çubuğunu ya da haritaya dokunmayı kullanabilirsin.",
     lines_need_location: "Önce konumuna izin vermen ya da 'Konumuma git' demen gerekiyor.",
     lines_error: "Hatlar yüklenemedi. Bağlantını kontrol edip tekrar dene.",
     lines_stops_count: "{count} durak",
     tour_lines: "Buradan konumuna yakın metro/tramvay hatlarını ve duraklarını listeleyip hazır seçebilirsin.",
+    retry: "Tekrar dene",
   },
   en: {
     app_name: "Geldik Mi?",
@@ -235,11 +237,13 @@ const I18N = {
     lines_title: "Nearby Lines",
     lines_hint: "Rail/tram lines near your location — found automatically from OpenStreetMap data, anywhere in the world.",
     lines_loading: "Looking for nearby lines…",
+    lines_loading_slow: "This is taking a bit longer — the free service may be busy, please wait…",
     lines_empty: "No rail system line found in this area. You can still use the search bar or tap the map directly.",
     lines_need_location: "You need to allow location access, or tap 'Go to my location' first.",
     lines_error: "Couldn't load lines. Check your connection and try again.",
     lines_stops_count: "{count} stops",
     tour_lines: "From here you can browse metro/tram lines and stops near you, and pick one ready-made.",
+    retry: "Try again",
   },
 };
 

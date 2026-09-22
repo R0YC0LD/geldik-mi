@@ -559,7 +559,12 @@
      Dünyanın her yerinde çalışır: kullanıcının konumuna yakın metro/
      tramvay/hafif raylı hatlarını bulup hazır seçim olarak sunar.
   ========================================================= */
-  const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+  // Birincisi aşırı yüklenirse/yanıt vermezse ikinci aynaya geç — tek
+  // sunucuya bağımlı kalmayıp "sorunsuz çalışması" için.
+  const OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
   const linesCache = { key: null, lines: null };
   const stopsCache = {};
 
@@ -569,19 +574,57 @@
   }
 
   async function overpassQuery(ql) {
-    const res = await fetch(OVERPASS_URL, { method: "POST", body: "data=" + encodeURIComponent(ql) });
-    if (!res.ok) throw new Error("overpass http " + res.status);
-    return res.json();
+    // Aynaları PARALEL dene (sırayla değil) — biri yavaş/aşırı yüklüyse
+    // diğerinden gelen ilk yanıtı kullan. Overpass genel kullanıma açık,
+    // ücretsiz bir servis olduğu için zaman zaman yavaşlayabilir; bu yüzden
+    // tek bir isteğe bağımlı kalmıyoruz.
+    const attempts = OVERPASS_URLS.map((url) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 25000);
+      return fetch(url, { method: "POST", body: "data=" + encodeURIComponent(ql), signal: ctrl.signal })
+        .then((res) => { clearTimeout(timer); if (!res.ok) throw new Error("overpass http " + res.status); return res.json(); })
+        .catch((e) => { clearTimeout(timer); throw e; });
+    });
+    try {
+      return await Promise.any(attempts);
+    } catch (e) {
+      throw new Error("Tüm Overpass aynaları başarısız oldu");
+    }
+  }
+
+  // Konumun bulunduğu yerleşimin kabaca büyüklüğünü Nominatim'in geri
+  // döndürdüğü sınır kutusundan (boundingbox) çıkarır. İdari sınır
+  // poligonunu Overpass'a sorgulatmak (area[...]) sunucu tarafında çok
+  // ağır ve yavaş olduğundan, onun yerine hafif bir "yarıçap" sorgusu
+  // kullanıyoruz — büyük bir il için otomatik olarak daha geniş bir
+  // yarıçap seçilmiş olur.
+  async function suggestedSearchRadius(lat, lng) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${lat}&lon=${lng}&accept-language=${I18N_STATE.lang}`
+      );
+      const data = await res.json();
+      if (data.boundingbox && data.boundingbox.length === 4) {
+        const [south, north, west, east] = data.boundingbox.map(Number);
+        const diagonal = haversine(south, west, north, east);
+        return Math.round(Math.min(60000, Math.max(15000, diagonal / 1.6)));
+      }
+    } catch (e) { /* geri dönüş yarıçapı kullanılacak */ }
+    return 30000;
   }
 
   async function fetchNearbyLines(lat, lng) {
     const key = lat.toFixed(2) + "," + lng.toFixed(2);
     if (linesCache.key === key && linesCache.lines) return linesCache.lines;
-    const ql = `[out:json][timeout:25];(relation["route"~"^(subway|light_rail|tram)$"](around:15000,${lat},${lng}););out tags;`;
+    const routeFilter = 'relation["route"~"^(subway|light_rail|tram)$"]';
+    const radius = await suggestedSearchRadius(lat, lng);
+    const ql = `[out:json][timeout:20];(${routeFilter}(around:${radius},${lat},${lng}););out tags;`;
     const data = await overpassQuery(ql);
+    const elements = data.elements || [];
+
     const seen = new Set();
     const lines = [];
-    for (const el of data.elements || []) {
+    for (const el of elements) {
       const tags = el.tags || {};
       const ref = tags.ref || tags.name || "?";
       const dedupeKey = ref + "|" + (tags.colour || "") + "|" + tags.route;
@@ -641,17 +684,41 @@
   document.getElementById("btn-lines-close").addEventListener("click", closeLinesSheet);
   linesOverlay.addEventListener("click", closeLinesSheet);
 
+  function getCurrentPositionAsync() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    });
+  }
+
+  function linesRetryHtml(msg) {
+    return `<p class="lines-empty">${msg}</p><button class="btn-primary btn-sm" id="btn-lines-retry" type="button" style="display:block;margin:0 auto;">${t("retry")}</button>`;
+  }
+
   async function loadLinesList() {
-    const pos = lastKnownLatLng();
+    linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div><span id="lines-loading-text">${t("lines_loading")}</span></div>`;
+    const slowNoticeTimer = setTimeout(() => {
+      const el = document.getElementById("lines-loading-text");
+      if (el) el.textContent = t("lines_loading_slow");
+    }, 7000);
+
+    let pos = lastKnownLatLng();
+    if (!pos) pos = await getCurrentPositionAsync();
     if (!pos) {
+      clearTimeout(slowNoticeTimer);
       linesContent.innerHTML = `<p class="lines-empty">${t("lines_need_location")}</p>`;
       return;
     }
-    linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div>${t("lines_loading")}</div>`;
     try {
       const lines = await fetchNearbyLines(pos.lat, pos.lng);
+      clearTimeout(slowNoticeTimer);
       if (!lines.length) {
-        linesContent.innerHTML = `<p class="lines-empty">${t("lines_empty")}</p>`;
+        linesContent.innerHTML = linesRetryHtml(t("lines_empty"));
+        document.getElementById("btn-lines-retry").addEventListener("click", () => { linesCache.key = null; loadLinesList(); });
         return;
       }
       const grid = document.createElement("div");
@@ -667,7 +734,9 @@
       linesContent.innerHTML = "";
       linesContent.appendChild(grid);
     } catch (e) {
-      linesContent.innerHTML = `<p class="lines-empty">${t("lines_error")}</p>`;
+      clearTimeout(slowNoticeTimer);
+      linesContent.innerHTML = linesRetryHtml(t("lines_error"));
+      document.getElementById("btn-lines-retry").addEventListener("click", () => { linesCache.key = null; loadLinesList(); });
     }
   }
 
