@@ -657,8 +657,37 @@
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
   ];
-  const linesCache = { key: null, lines: null };
-  const stopsCache = {};
+  // ---- Kalıcı, bölge bazlı önbellek (localStorage) ----
+  // Hatlar "şehir ölçeğinde" (kaba bölme) önbelleklenir: aynı şehirde
+  // gezinirken tekrar sorgulanmaz. Yakın duraklar "mahalle ölçeğinde"
+  // (ince bölme) önbelleklenir: gerçekten yakın kalsın diye. Farklı bir
+  // şehre (örn. Eskişehir) gidildiğinde bölge anahtarı otomatik değişir,
+  // o yüzden yanlışlıkla başka şehrin verisi gösterilmez.
+  const REGION_BUCKET_COARSE = 10;   // ~0.1° ≈ 11 km — hatlar (şehir)
+  const REGION_BUCKET_FINE = 100;    // ~0.01° ≈ 1.1 km — yakın duraklar
+  const CACHE_STALE_MS = 24 * 60 * 60 * 1000; // 24 saatten eskiyse arka planda sessizce tazele
+  const CACHE_MAX_ENTRIES = 30; // çok fazla bölge birikirse en eskisi silinir
+  const LINES_STORE_KEY = "geldikmi_lines_cache_v1";
+  const STOPS_STORE_KEY = "geldikmi_nearby_stops_cache_v1";
+  const LINE_STOPS_STORE_KEY = "geldikmi_line_stops_cache_v1";
+
+  function regionBucket(lat, lng, precision) {
+    return Math.round(lat * precision) + "," + Math.round(lng * precision);
+  }
+  function cacheGet(storeKey, bucketKey) {
+    const store = loadJSON(storeKey, {});
+    return store[bucketKey] || null;
+  }
+  function cacheSet(storeKey, bucketKey, value) {
+    const store = loadJSON(storeKey, {});
+    store[bucketKey] = Object.assign({}, value, { ts: Date.now() });
+    const keys = Object.keys(store);
+    if (keys.length > CACHE_MAX_ENTRIES) {
+      keys.sort((a, b) => store[a].ts - store[b].ts);
+      delete store[keys[0]];
+    }
+    saveJSON(storeKey, store);
+  }
 
   function lastKnownLatLng() {
     if (userMarker) { const ll = userMarker.getLatLng(); return { lat: ll.lat, lng: ll.lng }; }
@@ -705,14 +734,17 @@
     return 30000;
   }
 
-  async function fetchNearbyLines(lat, lng) {
-    const key = lat.toFixed(2) + "," + lng.toFixed(2);
-    if (linesCache.key === key && linesCache.lines) return linesCache.lines;
+  // Sadece ağdan çeker, önbelleğe bakmaz/yazmaz — çağıran taraf (loadLinesList)
+  // önbellek + anında gösterim + arka plan tazeleme akışını yönetir.
+  async function fetchNearbyLinesRaw(lat, lng) {
     // "train" dahil edildi: Marmaray gibi banliyö/şehir içi raylı hatlar
     // OSM'de çoğunlukla route=train olarak etiketleniyor.
     const routeFilter = 'relation["route"~"^(subway|light_rail|tram|train)$"]';
     const radius = await suggestedSearchRadius(lat, lng);
-    const ql = `[out:json][timeout:20];(${routeFilter}(around:${radius},${lat},${lng}););out tags;`;
+    // "center": her hattın kabaca orta noktasını da al — böylece sonuçlar
+    // kullanıcıya olan uzaklığa göre sıralanıp en ilgili/doğru hatlar
+    // listenin başına çıkarılabilir.
+    const ql = `[out:json][timeout:20];(${routeFilter}(around:${radius},${lat},${lng}););out tags center;`;
     const data = await overpassQuery(ql);
     const elements = data.elements || [];
 
@@ -724,16 +756,15 @@
       const dedupeKey = ref + "|" + (tags.colour || "") + "|" + tags.route;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
-      lines.push({ id: el.id, ref, name: tags.name || ref, colour: tags.colour || "", route: tags.route });
+      const center = el.center;
+      const dist = center ? haversine(lat, lng, center.lat, center.lon) : Infinity;
+      lines.push({ id: el.id, ref, name: tags.name || ref, colour: tags.colour || "", route: tags.route, dist });
     }
-    lines.sort((a, b) => a.ref.localeCompare(b.ref, undefined, { numeric: true }));
-    linesCache.key = key;
-    linesCache.lines = lines;
+    lines.sort((a, b) => a.dist - b.dist || a.ref.localeCompare(b.ref, undefined, { numeric: true }));
     return lines;
   }
 
-  async function fetchLineStops(relId) {
-    if (stopsCache[relId]) return stopsCache[relId];
+  async function fetchLineStopsRaw(relId) {
     const ql = `[out:json][timeout:25];relation(${relId});(._;>;);out body;`;
     const data = await overpassQuery(ql);
     const rel = (data.elements || []).find((e) => e.type === "relation" && e.id === relId);
@@ -753,7 +784,6 @@
         if (stops.length >= 60) break;
       }
     }
-    stopsCache[relId] = stops;
     return stops;
   }
 
@@ -814,45 +844,92 @@
     return `<p class="lines-empty">${msg}</p><button class="btn-primary btn-sm" id="btn-lines-retry" type="button" style="display:block;margin:0 auto;">${t("retry")}</button>`;
   }
 
-  async function loadLinesList() {
+  function isShowingLinesList() {
+    return !linesSheet.classList.contains("hidden") && linesActiveTab === "lines" && linesBackBtn.classList.contains("hidden");
+  }
+
+  function renderLinesBadges(lines) {
+    const grid = document.createElement("div");
+    grid.className = "line-badge-grid";
+    lines.forEach((line) => {
+      const badge = document.createElement("button");
+      badge.className = "line-badge";
+      badge.type = "button";
+      badge.innerHTML = `<span class="line-chip" style="background:${line.colour || "var(--color-secondary)"}">${line.ref.slice(0, 3)}</span>${line.name}`;
+      badge.addEventListener("click", () => openLineStops(line));
+      grid.appendChild(badge);
+    });
+    linesContent.innerHTML = "";
+    linesContent.appendChild(grid);
+  }
+
+  function wireLinesRetry(pos, bucket) {
+    const btn = document.getElementById("btn-lines-retry");
+    if (btn) btn.addEventListener("click", () => fetchAndShowLines(pos, bucket));
+  }
+
+  async function fetchAndShowLines(pos, bucket) {
     linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div><span id="lines-loading-text">${t("lines_loading")}</span></div>`;
     const slowNoticeTimer = setTimeout(() => {
       const el = document.getElementById("lines-loading-text");
       if (el) el.textContent = t("lines_loading_slow");
     }, 7000);
-
-    let pos = lastKnownLatLng();
-    if (!pos) pos = await getCurrentPositionAsync();
-    if (!pos) {
-      clearTimeout(slowNoticeTimer);
-      linesContent.innerHTML = `<p class="lines-empty">${t("lines_need_location")}</p>`;
-      return;
-    }
     try {
-      const lines = await fetchNearbyLines(pos.lat, pos.lng);
+      const lines = await fetchNearbyLinesRaw(pos.lat, pos.lng);
       clearTimeout(slowNoticeTimer);
+      cacheSet(LINES_STORE_KEY, bucket, { lines });
       if (!lines.length) {
         linesContent.innerHTML = linesRetryHtml(t("lines_empty"));
-        document.getElementById("btn-lines-retry").addEventListener("click", () => { linesCache.key = null; loadLinesList(); });
+        wireLinesRetry(pos, bucket);
         return;
       }
-      const grid = document.createElement("div");
-      grid.className = "line-badge-grid";
-      lines.forEach((line) => {
-        const badge = document.createElement("button");
-        badge.className = "line-badge";
-        badge.type = "button";
-        badge.innerHTML = `<span class="line-chip" style="background:${line.colour || "var(--color-secondary)"}">${line.ref.slice(0, 3)}</span>${line.name}`;
-        badge.addEventListener("click", () => openLineStops(line));
-        grid.appendChild(badge);
-      });
-      linesContent.innerHTML = "";
-      linesContent.appendChild(grid);
+      renderLinesBadges(lines);
     } catch (e) {
       clearTimeout(slowNoticeTimer);
       linesContent.innerHTML = linesRetryHtml(t("lines_error"));
-      document.getElementById("btn-lines-retry").addEventListener("click", () => { linesCache.key = null; loadLinesList(); });
+      wireLinesRetry(pos, bucket);
     }
+  }
+
+  async function loadLinesList() {
+    let pos = lastKnownLatLng();
+    if (!pos) pos = await getCurrentPositionAsync();
+    if (!pos) {
+      linesContent.innerHTML = `<p class="lines-empty">${t("lines_need_location")}</p>`;
+      return;
+    }
+    // Bölge (şehir ölçeğinde) daha önce bulunmuşsa: hiç beklemeden, anında
+    // ekrana düşür. Veriler 24 saatten eskiyse arka planda sessizce
+    // tazelenir — kullanıcı hiçbir yükleme animasyonu görmez.
+    const bucket = regionBucket(pos.lat, pos.lng, REGION_BUCKET_COARSE);
+    const cached = cacheGet(LINES_STORE_KEY, bucket);
+    if (cached) {
+      if (!cached.lines.length) { linesContent.innerHTML = linesRetryHtml(t("lines_empty")); wireLinesRetry(pos, bucket); }
+      else renderLinesBadges(cached.lines);
+      if (Date.now() - cached.ts > CACHE_STALE_MS) {
+        fetchNearbyLinesRaw(pos.lat, pos.lng)
+          .then((lines) => { cacheSet(LINES_STORE_KEY, bucket, { lines }); if (isShowingLinesList()) renderLinesBadges(lines); })
+          .catch(() => {});
+      }
+      return;
+    }
+    await fetchAndShowLines(pos, bucket);
+  }
+
+  function renderLineStopsRows(stops, line) {
+    linesContent.innerHTML = "";
+    stops.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "line-stop-row";
+      row.innerHTML = `<span class="line-stop-dot" style="background:${line.colour || "var(--color-primary)"}"></span><span class="line-stop-name">${s.name}</span>`;
+      row.addEventListener("click", () => {
+        closeLinesSheet();
+        ensureMap();
+        map.setView([s.lat, s.lng], 16);
+        placeTarget(s.lat, s.lng, { name: s.name, address: s.name + " — " + line.name });
+      });
+      linesContent.appendChild(row);
+    });
   }
 
   async function openLineStops(line) {
@@ -860,26 +937,28 @@
     linesTabs.classList.add("hidden");
     document.getElementById("lines-title").textContent = line.name;
     document.getElementById("lines-hint").classList.add("hidden");
+
+    // Hattın durak sırası neredeyse hiç değişmez; kalıcı önbellekten anında
+    // göster, arka planda sessizce tazele.
+    const cached = cacheGet(LINE_STOPS_STORE_KEY, String(line.id));
+    if (cached) {
+      if (!cached.stops.length) linesContent.innerHTML = `<p class="lines-empty">${t("lines_empty")}</p>`;
+      else renderLineStopsRows(cached.stops, line);
+      if (Date.now() - cached.ts > CACHE_STALE_MS) {
+        fetchLineStopsRaw(line.id).then((stops) => cacheSet(LINE_STOPS_STORE_KEY, String(line.id), { stops })).catch(() => {});
+      }
+      return;
+    }
+
     linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div>${t("lines_loading")}</div>`;
     try {
-      const stops = await fetchLineStops(line.id);
+      const stops = await fetchLineStopsRaw(line.id);
+      cacheSet(LINE_STOPS_STORE_KEY, String(line.id), { stops });
       if (!stops.length) {
         linesContent.innerHTML = `<p class="lines-empty">${t("lines_empty")}</p>`;
         return;
       }
-      linesContent.innerHTML = "";
-      stops.forEach((s) => {
-        const row = document.createElement("div");
-        row.className = "line-stop-row";
-        row.innerHTML = `<span class="line-stop-dot" style="background:${line.colour || "var(--color-primary)"}"></span><span class="line-stop-name">${s.name}</span>`;
-        row.addEventListener("click", () => {
-          closeLinesSheet();
-          ensureMap();
-          map.setView([s.lat, s.lng], 16);
-          placeTarget(s.lat, s.lng, { name: s.name, address: s.name + " — " + line.name });
-        });
-        linesContent.appendChild(row);
-      });
+      renderLineStopsRows(stops, line);
     } catch (e) {
       linesContent.innerHTML = `<p class="lines-empty">${t("lines_error")}</p>`;
     }
@@ -893,11 +972,30 @@
   });
 
   /* ---- Yakın duraklar (tek tek, hat bağımsız) ---- */
-  const stopsCacheByCoord = { key: null, stops: null };
+  function isShowingStopsList() {
+    return !linesSheet.classList.contains("hidden") && linesActiveTab === "stops";
+  }
 
-  async function fetchNearbyStops(lat, lng) {
-    const key = lat.toFixed(3) + "," + lng.toFixed(3);
-    if (stopsCacheByCoord.key === key && stopsCacheByCoord.stops) return stopsCacheByCoord.stops;
+  function renderStopsRows(stops) {
+    linesContent.innerHTML = "";
+    stops.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "line-stop-row";
+      row.innerHTML =
+        `<span class="line-stop-dot" style="background:var(--color-primary)"></span>` +
+        `<span class="line-stop-name">${s.name}</span>` +
+        `<span class="stop-distance">${formatDistance(s.dist)}</span>`;
+      row.addEventListener("click", () => {
+        closeLinesSheet();
+        ensureMap();
+        map.setView([s.lat, s.lng], 16);
+        placeTarget(s.lat, s.lng, { name: s.name, address: s.name });
+      });
+      linesContent.appendChild(row);
+    });
+  }
+
+  async function fetchNearbyStopsRaw(lat, lng) {
     const filter =
       '(node["highway"="bus_stop"](around:R,LAT,LNG);' +
       'node["public_transport"="stop_position"](around:R,LAT,LNG);' +
@@ -923,47 +1021,53 @@
       stops.push({ name, lat: el.lat, lng: el.lon, dist: haversine(lat, lng, el.lat, el.lon) });
     }
     stops.sort((a, b) => a.dist - b.dist);
-    const top = stops.slice(0, 40);
-    stopsCacheByCoord.key = key;
-    stopsCacheByCoord.stops = top;
-    return top;
+    return stops.slice(0, 40);
+  }
+
+  function wireStopsRetry(pos, bucket) {
+    const btn = document.getElementById("btn-lines-retry");
+    if (btn) btn.addEventListener("click", () => fetchAndShowStops(pos, bucket));
+  }
+
+  async function fetchAndShowStops(pos, bucket) {
+    linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div><span id="lines-loading-text">${t("stops_loading")}</span></div>`;
+    try {
+      const stops = await fetchNearbyStopsRaw(pos.lat, pos.lng);
+      cacheSet(STOPS_STORE_KEY, bucket, { stops });
+      if (!stops.length) {
+        linesContent.innerHTML = linesRetryHtml(t("stops_empty"));
+        wireStopsRetry(pos, bucket);
+        return;
+      }
+      renderStopsRows(stops);
+    } catch (e) {
+      linesContent.innerHTML = linesRetryHtml(t("lines_error"));
+      wireStopsRetry(pos, bucket);
+    }
   }
 
   async function loadStopsList() {
-    linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div><span id="lines-loading-text">${t("stops_loading")}</span></div>`;
     let pos = lastKnownLatLng();
     if (!pos) pos = await getCurrentPositionAsync();
     if (!pos) {
       linesContent.innerHTML = `<p class="lines-empty">${t("stops_need_location")}</p>`;
       return;
     }
-    try {
-      const stops = await fetchNearbyStops(pos.lat, pos.lng);
-      if (!stops.length) {
-        linesContent.innerHTML = linesRetryHtml(t("stops_empty"));
-        document.getElementById("btn-lines-retry").addEventListener("click", () => { stopsCacheByCoord.key = null; loadStopsList(); });
-        return;
+    // İnce (mahalle ölçeğinde) bölge önbelleği: gerçekten yakın kalsın diye
+    // hatlardan daha dar bir bölgeye göre önbelleklenir.
+    const bucket = regionBucket(pos.lat, pos.lng, REGION_BUCKET_FINE);
+    const cached = cacheGet(STOPS_STORE_KEY, bucket);
+    if (cached) {
+      if (!cached.stops.length) { linesContent.innerHTML = linesRetryHtml(t("stops_empty")); wireStopsRetry(pos, bucket); }
+      else renderStopsRows(cached.stops);
+      if (Date.now() - cached.ts > CACHE_STALE_MS) {
+        fetchNearbyStopsRaw(pos.lat, pos.lng)
+          .then((stops) => { cacheSet(STOPS_STORE_KEY, bucket, { stops }); if (isShowingStopsList()) renderStopsRows(stops); })
+          .catch(() => {});
       }
-      linesContent.innerHTML = "";
-      stops.forEach((s) => {
-        const row = document.createElement("div");
-        row.className = "line-stop-row";
-        row.innerHTML =
-          `<span class="line-stop-dot" style="background:var(--color-primary)"></span>` +
-          `<span class="line-stop-name">${s.name}</span>` +
-          `<span class="stop-distance">${formatDistance(s.dist)}</span>`;
-        row.addEventListener("click", () => {
-          closeLinesSheet();
-          ensureMap();
-          map.setView([s.lat, s.lng], 16);
-          placeTarget(s.lat, s.lng, { name: s.name, address: s.name });
-        });
-        linesContent.appendChild(row);
-      });
-    } catch (e) {
-      linesContent.innerHTML = linesRetryHtml(t("lines_error"));
-      document.getElementById("btn-lines-retry").addEventListener("click", () => { stopsCacheByCoord.key = null; loadStopsList(); });
+      return;
     }
+    await fetchAndShowStops(pos, bucket);
   }
 
   /* =========================================================
