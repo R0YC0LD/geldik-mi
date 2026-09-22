@@ -304,66 +304,225 @@
   });
 
   /* =========================================================
-     GERÇEK ROTA (OSRM) — moovit benzeri: düz çizgi yerine gerçek
-     yürüme rotası. Çevrimdışı/erişilemezse sessizce düz çizgiye
-     düşer (fallback); alarm tetikleme mantığı buna hiç bağlı değil,
-     her zaman fiziksel (haversine) mesafeyle çalışmaya devam eder.
+     KENDİ ROTA BULMA MOTORUMUZ — dış bir yönlendirme (routing)
+     servisine (OSRM vb.) bağımlı kalmamak için: zaten güvenilir
+     çalışan Overpass altyapımızdan yol ağı verisini çekip, kendi
+     graf + A* (en kısa yol) algoritmamızla rotayı hesaplıyoruz.
+     Düz çizgi YOKTUR: rota bulunamazsa hiçbir çizgi çizilmez, sadece
+     mesafe bilgisi gösterilir. Alarm tetikleme mantığı buna hiç
+     bağlı değil, her zaman fiziksel (haversine) mesafeyle çalışır.
   ========================================================= */
-  // İki bağımsız halka açık OSRM sunucusu PARALEL denenir (Overpass'takiyle
-  // aynı mantık): biri yavaş/aşırı yüklüyse diğerinden gelen ilk geçerli
-  // yanıt kullanılır. Tek sunucuya bağımlı kalınca gerçek kullanımda
-  // (uzun mesafeler, yoğun saatler) zaman zaman düz-çizgiye düşüldüğü
-  // görüldü; bu yüzden iki ayna + daha cömert zaman aşımı kullanılıyor.
-  const OSRM_URLS = [
-    "https://router.project-osrm.org/route/v1/foot/",
-    "https://routing.openstreetmap.de/routed-foot/route/v1/foot/",
-  ];
+  const ROUTE_MAX_STRAIGHT_DIST = 7000; // 7 km üstü: yol ağını çekmek pratik değil
+  const WALK_SPEED_MPS = 1.35; // ortalama yürüme hızı (~4,9 km/sa)
   const routeCache = {};
 
   function routeCacheKey(lat1, lng1, lat2, lng2) {
     return lat1.toFixed(4) + "," + lng1.toFixed(4) + "," + lat2.toFixed(4) + "," + lng2.toFixed(4);
   }
 
-  async function osrmRequest(baseUrl, lat1, lng1, lat2, lng2, signal) {
-    const url = `${baseUrl}${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error("osrm http " + res.status);
-    const data = await res.json();
-    if (data.code !== "Ok" || !data.routes || !data.routes.length) throw new Error("rota yok");
-    return data.routes[0];
+  // Basit ikili yığın (binary min-heap) — A* için öncelik kuyruğu.
+  class MinHeap {
+    constructor() { this.items = []; }
+    push(key, priority) {
+      this.items.push({ key, priority });
+      let i = this.items.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (this.items[p].priority <= this.items[i].priority) break;
+        [this.items[p], this.items[i]] = [this.items[i], this.items[p]];
+        i = p;
+      }
+    }
+    pop() {
+      if (!this.items.length) return null;
+      const top = this.items[0];
+      const last = this.items.pop();
+      if (this.items.length) {
+        this.items[0] = last;
+        let i = 0;
+        const n = this.items.length;
+        while (true) {
+          let smallest = i, l = 2 * i + 1, r = 2 * i + 2;
+          if (l < n && this.items[l].priority < this.items[smallest].priority) smallest = l;
+          if (r < n && this.items[r].priority < this.items[smallest].priority) smallest = r;
+          if (smallest === i) break;
+          [this.items[smallest], this.items[i]] = [this.items[i], this.items[smallest]];
+          i = smallest;
+        }
+      }
+      return top.key;
+    }
+    get size() { return this.items.length; }
   }
 
-  async function fetchWalkingRoute(lat1, lng1, lat2, lng2) {
-    const key = routeCacheKey(lat1, lng1, lat2, lng2);
-    const cached = routeCache[key];
-    if (cached && Date.now() - cached.ts < 90000) return cached;
+  async function fetchRoadNetwork(lat1, lng1, lat2, lng2) {
+    const pad = 0.006; // ~650 m kenar payı — başlangıç/hedef ağın kenarında kalmasın
+    const south = Math.min(lat1, lat2) - pad;
+    const north = Math.max(lat1, lat2) + pad;
+    const west = Math.min(lng1, lng2) - pad;
+    const east = Math.max(lng1, lng2) + pad;
+    const highwayFilter =
+      'way["highway"~"^(footway|path|pedestrian|residential|living_street|service|tertiary|secondary|primary|unclassified|steps|track|trunk|cycleway|primary_link|secondary_link|tertiary_link)$"]';
+    const ql = `[out:json][timeout:20];(${highwayFilter}(${south},${west},${north},${east}););out geom;`;
+    const data = await overpassQuery(ql);
+    return data.elements || [];
+  }
 
-    const attempts = OSRM_URLS.map((baseUrl) => {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 15000);
-      return osrmRequest(baseUrl, lat1, lng1, lat2, lng2, ctrl.signal)
-        .then((r) => { clearTimeout(timer); return r; })
-        .catch((e) => { clearTimeout(timer); throw e; });
-    });
+  function keyOfPoint(lat, lng) { return lat.toFixed(6) + "," + lng.toFixed(6); }
+  function parsePoint(key) {
+    const i = key.indexOf(",");
+    return [Number(key.slice(0, i)), Number(key.slice(i + 1))];
+  }
 
+  function buildRoadGraph(ways) {
+    const graph = new Map();
+    const addEdge = (a, b, dist) => {
+      if (!graph.has(a)) graph.set(a, []);
+      graph.get(a).push({ to: b, dist });
+    };
+    for (const way of ways) {
+      const pts = way.geometry;
+      if (!pts || pts.length < 2) continue;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = keyOfPoint(pts[i].lat, pts[i].lon);
+        const b = keyOfPoint(pts[i + 1].lat, pts[i + 1].lon);
+        if (a === b) continue;
+        const d = haversine(pts[i].lat, pts[i].lon, pts[i + 1].lat, pts[i + 1].lon);
+        addEdge(a, b, d);
+        addEdge(b, a, d); // yaya için yollar çift yönlü kabul edilir
+      }
+    }
+    return graph;
+  }
+
+  function nearestGraphNode(graph, lat, lng) {
+    let best = null, bestDist = Infinity;
+    for (const key of graph.keys()) {
+      const [nlat, nlng] = parsePoint(key);
+      const d = haversine(lat, lng, nlat, nlng);
+      if (d < bestDist) { bestDist = d; best = key; }
+    }
+    return { key: best, dist: bestDist };
+  }
+
+  // A* — sezgisel (heuristic) fonksiyon olarak hedefe kuş uçuşu (haversine)
+  // mesafesi kullanılır. Bu sezgi gerçek yol mesafesini asla abartmadığı
+  // (admissible) için algoritma her zaman en kısa yolu bulur; Dijkstra'nın
+  // hedefe doğru "yönlendirilmiş", dolayısıyla çok daha hızlı halidir.
+  function aStarShortestPath(graph, startKey, goalKey) {
+    const [goalLat, goalLng] = parsePoint(goalKey);
+    const h = (key) => { const [la, ln] = parsePoint(key); return haversine(la, ln, goalLat, goalLng); };
+
+    const gScore = new Map([[startKey, 0]]);
+    const cameFrom = new Map();
+    const visited = new Set();
+    const open = new MinHeap();
+    open.push(startKey, h(startKey));
+
+    let iterations = 0;
+    while (open.size) {
+      if (++iterations > 40000) return null; // güvenlik sınırı — aşırı büyük graf
+      const current = open.pop();
+      if (visited.has(current)) continue;
+      if (current === goalKey) {
+        const path = [current];
+        let c = current;
+        while (cameFrom.has(c)) { c = cameFrom.get(c); path.push(c); }
+        path.reverse();
+        return path.map(parsePoint);
+      }
+      visited.add(current);
+      for (const { to, dist } of graph.get(current) || []) {
+        if (visited.has(to)) continue;
+        const tentativeG = gScore.get(current) + dist;
+        if (tentativeG < (gScore.has(to) ? gScore.get(to) : Infinity)) {
+          cameFrom.set(to, current);
+          gScore.set(to, tentativeG);
+          open.push(to, tentativeG + h(to));
+        }
+      }
+    }
+    return null;
+  }
+
+  function pathDistance(points) {
+    let total = 0;
+    for (let i = 0; i < points.length - 1; i++) total += haversine(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1]);
+    return total;
+  }
+
+  // Hedef etrafında yeterince geniş, SABİT bir bölge önbelleklenir — bir
+  // yolculuk boyunca kullanıcı yürüdükçe (başlangıç noktası değiştikçe)
+  // yol ağı ağdan TEKRAR ÇEKİLMEZ; sadece üzerinde A* yeniden çalıştırılır
+  // (yerel/anlık). Bu, rota yenilemelerini çok daha hızlı ve kararlı yapar.
+  const roadGraphCache = {};
+  const roadGraphInflight = {};
+  function isWithinBounds(b, lat, lng) {
+    return lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east;
+  }
+  async function getRoadGraphFor(lat1, lng1, lat2, lng2) {
+    const destKey = keyOfPoint(lat2, lng2);
+    const cached = roadGraphCache[destKey];
+    if (cached && Date.now() - cached.ts < 20 * 60 * 1000 && isWithinBounds(cached.bounds, lat1, lng1)) {
+      return cached.graph;
+    }
+    // Aynı hedef için zaten devam eden bir çekim varsa (örn. önizleme rotası
+    // daha bitmeden yolculuk başlatıldıysa) onu paylaş — zaten kırılgan olan
+    // Overpass sunucularına aynı sorguyu ikinci kez göndermeyi önler.
+    const inflight = roadGraphInflight[destKey];
+    if (inflight && isWithinBounds(inflight.bounds, lat1, lng1)) {
+      return inflight.promise;
+    }
+    const pad = 0.006;
+    const bounds = {
+      south: Math.min(lat1, lat2) - pad, north: Math.max(lat1, lat2) + pad,
+      west: Math.min(lng1, lng2) - pad, east: Math.max(lng1, lng2) + pad,
+    };
+    const promise = (async () => {
+      const ways = await fetchRoadNetwork(lat1, lng1, lat2, lng2);
+      const graph = buildRoadGraph(ways);
+      roadGraphCache[destKey] = { graph, bounds, ts: Date.now() };
+      return graph;
+    })();
+    roadGraphInflight[destKey] = { promise, bounds };
     try {
-      const r = await Promise.any(attempts);
-      const result = {
-        coords: r.geometry.coordinates.map((c) => [c[1], c[0]]),
-        distance: r.distance,
-        duration: r.duration,
-        ts: Date.now(),
-      };
-      routeCache[key] = result;
-      return result;
-    } catch (e) {
-      return null; // her iki ayna da başarısız — çağıran taraf düz çizgiye düşer
+      return await promise;
+    } finally {
+      if (roadGraphInflight[destKey] && roadGraphInflight[destKey].promise === promise) {
+        delete roadGraphInflight[destKey];
+      }
     }
   }
 
-  function drawRouteOrFallback(targetMapObj, fromLatLng, toLatLng, existingLine, color) {
-    if (existingLine) targetMapObj.removeLayer(existingLine);
-    return L.polyline([fromLatLng, toLatLng], { color, weight: 3, dashArray: "6 6", opacity: 0.7 }).addTo(targetMapObj);
+  async function fetchWalkingRoute(lat1, lng1, lat2, lng2) {
+    const straight = haversine(lat1, lng1, lat2, lng2);
+    if (straight > ROUTE_MAX_STRAIGHT_DIST) return null; // çok uzun — yol ağını çekmek pratik değil
+
+    const key = routeCacheKey(lat1, lng1, lat2, lng2);
+    const cached = routeCache[key];
+    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached;
+
+    try {
+      const graph = await getRoadGraphFor(lat1, lng1, lat2, lng2);
+      if (!graph.size) return null;
+
+      const start = nearestGraphNode(graph, lat1, lng1);
+      const goal = nearestGraphNode(graph, lat2, lng2);
+      // Başlangıç/bitiş noktası yol ağından çok uzaksa (bina içi, veri
+      // boşluğu vb.) güvenilir bir rota kurulamaz.
+      if (!start.key || !goal.key || start.dist > 400 || goal.dist > 400) return null;
+
+      const pathPoints = aStarShortestPath(graph, start.key, goal.key);
+      if (!pathPoints || pathPoints.length < 2) return null;
+
+      const coords = [[lat1, lng1], ...pathPoints, [lat2, lng2]];
+      const distance = pathDistance(coords);
+      const result = { coords, distance, duration: distance / WALK_SPEED_MPS, ts: Date.now() };
+      routeCache[key] = result;
+      return result;
+    } catch (e) {
+      return null; // yol ağı alınamadı (çevrimdışı vb.) — çağıran taraf çizgisiz geçer
+    }
   }
 
   /* =========================================================
@@ -484,12 +643,13 @@
     if (previewRouteLine) { map.removeLayer(previewRouteLine); previewRouteLine = null; }
     if (route) {
       previewRouteLine = L.polyline(route.coords, { color: "#FF6B00", weight: 4, opacity: 0.85 }).addTo(map);
+      previewRouteLine.bringToBack();
       routeInfoEl.innerHTML = `<svg width="14" height="14"><use href="#i-map"/></svg> ${t("route_walking")}: ${formatDistance(route.distance)} · ${formatDuration(route.duration)}`;
     } else {
-      previewRouteLine = drawRouteOrFallback(map, [u.lat, u.lng], [target.lat, target.lng], null, "#8A93A6");
-      routeInfoEl.innerHTML = `<svg width="14" height="14"><use href="#i-signal"/></svg> ${t("route_unavailable")}`;
+      // Rota bulunamadı: düz çizgi ÇİZİLMEZ, sadece kuş uçuşu mesafe bilgisi gösterilir.
+      const straight = haversine(u.lat, u.lng, target.lat, target.lng);
+      routeInfoEl.innerHTML = `<svg width="14" height="14"><use href="#i-signal"/></svg> ${t("route_unavailable")} (${formatDistance(straight)})`;
     }
-    previewRouteLine.bringToBack();
   }
 
   async function reverseGeocode(lat, lng) {
@@ -656,6 +816,7 @@
   const OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
   ];
   // ---- Kalıcı, bölge bazlı önbellek (localStorage) ----
   // Hatlar "şehir ölçeğinde" (kaba bölme) önbelleklenir: aynı şehirde
@@ -701,7 +862,7 @@
     // tek bir isteğe bağımlı kalmıyoruz.
     const attempts = OVERPASS_URLS.map((url) => {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 25000);
+      const timer = setTimeout(() => ctrl.abort(), 15000);
       return fetch(url, { method: "POST", body: "data=" + encodeURIComponent(ql), signal: ctrl.signal })
         .then((res) => { clearTimeout(timer); if (!res.ok) throw new Error("overpass http " + res.status); return res.json(); })
         .catch((e) => { clearTimeout(timer); throw e; });
@@ -1265,20 +1426,24 @@
     const dest = trip.dest;
     const route = await fetchWalkingRoute(lat, lng, dest.lat, dest.lng);
     if (!trip || trip.routeToken !== myToken || trip.dest !== dest) return; // yolculuk bu sırada bitmiş/değişmiş olabilir
-    if (tripLine) tripMap.removeLayer(tripLine);
+    if (tripLine) { tripMap.removeLayer(tripLine); tripLine = null; }
     const routeInfoEl = document.getElementById("trip-route-info");
     if (route) {
       tripLine = L.polyline(route.coords, { color: "#1A2340", weight: 3, opacity: 0.85 }).addTo(tripMap);
       trip.routeDistance = route.distance;
       routeInfoEl.textContent = t("route_walking_short") + ": " + formatDistance(route.distance);
       routeInfoEl.classList.remove("hidden");
+      tripMap.fitBounds(tripLine.getBounds(), { padding: [60, 60] });
     } else {
-      tripLine = drawRouteOrFallback(tripMap, [lat, lng], [dest.lat, dest.lng], null, "#1A2340");
+      // Rota bulunamadı: düz çizgi ÇİZİLMEZ — sadece kuş uçuşu mesafe gösterilir.
+      // (Alarm/kalan mesafe mantığı zaten her zaman doğrudan GPS mesafesini kullanır,
+      // bu satır sadece bilgilendirme amaçlıdır.)
       trip.routeDistance = null;
-      routeInfoEl.textContent = t("route_unavailable");
+      const straight = haversine(lat, lng, dest.lat, dest.lng);
+      routeInfoEl.innerHTML = `<svg width="14" height="14"><use href="#i-signal"/></svg> ${t("route_unavailable")} (${formatDistance(straight)})`;
       routeInfoEl.classList.remove("hidden");
+      tripMap.setView([lat, lng], tripMap.getZoom());
     }
-    tripMap.fitBounds(tripLine.getBounds(), { padding: [60, 60] });
   }
 
   function checkSignal() {
@@ -1314,17 +1479,15 @@
     }
     // Gerçek rota: her GPS okumasında değil, ~120m'den fazla hareket
     // edildiğinde yeniden hesaplanır (gereksiz istek yapmamak için).
-    // İlk çizim anında düz çizgiyle yapılır, rota gelince yerini alır.
+    // Rota hesaplanana kadar hiçbir çizgi çizilmez (düz çizgi yok).
     const needsRoute = !trip.routeAnchor || haversine(trip.routeAnchor.lat, trip.routeAnchor.lng, latitude, longitude) > 120;
     if (needsRoute) {
       trip.routeAnchor = { lat: latitude, lng: longitude };
-      if (!tripLine) {
-        tripLine = drawRouteOrFallback(tripMap, [latitude, longitude], [trip.dest.lat, trip.dest.lng], null, "#1A2340");
-        tripMap.fitBounds(tripLine.getBounds(), { padding: [60, 60] });
-      }
       updateTripRoute(latitude, longitude);
     } else if (tripLine) {
       tripMap.fitBounds(L.latLngBounds([latitude, longitude], [trip.dest.lat, trip.dest.lng]), { padding: [60, 60] });
+    } else {
+      tripMap.setView([latitude, longitude], tripMap.getZoom());
     }
 
     document.getElementById("trip-remaining").textContent = formatDistance(remaining) + " " + t("trip_remaining_suffix");

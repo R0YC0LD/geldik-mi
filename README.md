@@ -138,8 +138,11 @@ yüklenmeden gerçekleşir.
   konum iznin varsa otomatik olarak senin bulunduğun yere uçar.
 - **Türkçe / İngilizce arayüz** — Ayarlar'dan dilini değiştirebilirsin.
 - **Gerçek rota çizimi:** Hedefini seçtiğinde, aranızda düz bir çizgi değil,
-  yol ağını takip eden **gerçek yürüme rotası** çizilir (OSRM üzerinden) —
-  gerçek mesafe ve tahmini süre ile birlikte. Rota servisine ulaşılamazsa
+  yol ağını takip eden **gerçek yürüme rotası** çizilir. Bu, dışarıdan bir
+  rota servisine (OSRM vb.) bağımlı olmayan, **uygulamanın kendi A\*
+  algoritmasıyla** çalışır: Overpass'tan çekilen yol ağı verisinden anlık bir
+  graf kurulur ve en kısa yol bu graf üzerinde yerel olarak hesaplanır —
+  gerçek mesafe ve tahmini süre ile birlikte. Yol ağı verisine ulaşılamazsa
   (çevrimdışıysan vb.) sessizce düz-çizgi tahminine döner; alarm tetikleme
   mantığı buna hiçbir zaman bağlı değildir, her zaman doğrudan GPS
   mesafesiyle çalışır.
@@ -231,14 +234,26 @@ bunlar dürüstçe belirtilmelidir:
   ekran açma** gibi native işletim sistemi seviyesindeki davranışlar web'den
   yapılamaz; bunun yerine sekme öndeyken tam ekran yanıp sönme + Web Audio
   alarm sesi + titreşim + (izin verildiyse) tekrarlanan bildirimler kullanılır.
-- **Nominatim** (adres arama), **Overpass** (yakındaki hatlar/duraklar) ve
-  **OSRM** (yürüme rotası) — üçü de ücretsiz, herkese açık, topluluk destekli
-  servislerdir; tarayıcı güvenliği nedeniyle özel bir `User-Agent` başlığı
-  ayarlanamaz ve bu servisler zaman zaman yavaşlayabilir/yoğun olabilir
-  (uygulama bunu "Tekrar dene" düğmeleriyle ve sessiz düz-çizgi
-  yedekleriyle karşılar). Nominatim istekleri istemci tarafında saniyede 1
-  ile sınırlanmıştır. Yoğun/ticari kullanımda kendi sunucunuz üzerinden
-  vekil (proxy) kullanmanız önerilir.
+- **Nominatim** (adres arama) ve **Overpass** (yakındaki hatlar/duraklar +
+  yürüme rotası için yol ağı verisi) — ikisi de ücretsiz, herkese açık,
+  topluluk destekli servislerdir; tarayıcı güvenliği nedeniyle özel bir
+  `User-Agent` başlığı ayarlanamaz ve bu servisler zaman zaman
+  yavaşlayabilir/yoğun olabilir. Overpass sorguları, tek bir sunucuya bağımlı
+  kalmamak için birden fazla aynaya (overpass-api.de, overpass.kumi.systems,
+  maps.mail.ru) aynı anda gönderilir ve ilk yanıt veren kullanılır; ayrıca
+  yürüme rotası için çekilen yol ağı hedef bazında önbelleğe alınır, böylece
+  aynı yolculuk sırasında konumun her güncellenmesinde ağ tekrar
+  sorgulanmaz. Tüm bunlara rağmen servis erişilemez kalırsa uygulama
+  "Tekrar dene" düğmeleriyle ve sessiz düz-çizgi yedekleriyle karşılar.
+  Nominatim istekleri istemci tarafında saniyede 1 ile sınırlanmıştır.
+  Yoğun/ticari kullanımda kendi sunucunuz üzerinden vekil (proxy)
+  kullanmanız önerilir.
+- **Rota algoritmasının kapsamı:** kendi A\* motorumuz, başlangıç ve hedef
+  arası kuş uçuşu mesafe **7 km'yi** aşan durumlarda (yol ağını o kadar geniş
+  bir alan için çekmek pratik olmadığından) devreye girmez ve düz-çizgi
+  tahminine döner; ayrıca başlangıç/hedef noktası en yakın yol ağı
+  düğümünden **400 metreden** uzaksa (bina içi, veri boşluğu vb.) güvenilir
+  bir rota kurulamayacağından yine düz-çizgi tahmini gösterilir.
 - Yerel durak veritabanı (`js/stops-data.js`) İstanbul için bir başlangıç
   setidir, tüm istasyonları içermez; bazı koordinatlar `verified:false` ile
   işaretlenmiştir. Bunun dışında **arama ve haritaya dokunma dünyanın her
