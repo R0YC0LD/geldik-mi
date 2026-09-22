@@ -309,27 +309,45 @@
      düşer (fallback); alarm tetikleme mantığı buna hiç bağlı değil,
      her zaman fiziksel (haversine) mesafeyle çalışmaya devam eder.
   ========================================================= */
-  const OSRM_URL = "https://router.project-osrm.org/route/v1/foot/";
+  // İki bağımsız halka açık OSRM sunucusu PARALEL denenir (Overpass'takiyle
+  // aynı mantık): biri yavaş/aşırı yüklüyse diğerinden gelen ilk geçerli
+  // yanıt kullanılır. Tek sunucuya bağımlı kalınca gerçek kullanımda
+  // (uzun mesafeler, yoğun saatler) zaman zaman düz-çizgiye düşüldüğü
+  // görüldü; bu yüzden iki ayna + daha cömert zaman aşımı kullanılıyor.
+  const OSRM_URLS = [
+    "https://router.project-osrm.org/route/v1/foot/",
+    "https://routing.openstreetmap.de/routed-foot/route/v1/foot/",
+  ];
   const routeCache = {};
 
   function routeCacheKey(lat1, lng1, lat2, lng2) {
     return lat1.toFixed(4) + "," + lng1.toFixed(4) + "," + lat2.toFixed(4) + "," + lng2.toFixed(4);
   }
 
+  async function osrmRequest(baseUrl, lat1, lng1, lat2, lng2, signal) {
+    const url = `${baseUrl}${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
+    const res = await fetch(url, { signal });
+    if (!res.ok) throw new Error("osrm http " + res.status);
+    const data = await res.json();
+    if (data.code !== "Ok" || !data.routes || !data.routes.length) throw new Error("rota yok");
+    return data.routes[0];
+  }
+
   async function fetchWalkingRoute(lat1, lng1, lat2, lng2) {
     const key = routeCacheKey(lat1, lng1, lat2, lng2);
     const cached = routeCache[key];
     if (cached && Date.now() - cached.ts < 90000) return cached;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
+
+    const attempts = OSRM_URLS.map((baseUrl) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      return osrmRequest(baseUrl, lat1, lng1, lat2, lng2, ctrl.signal)
+        .then((r) => { clearTimeout(timer); return r; })
+        .catch((e) => { clearTimeout(timer); throw e; });
+    });
+
     try {
-      const url = `${OSRM_URL}${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
-      const res = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) throw new Error("osrm http " + res.status);
-      const data = await res.json();
-      if (data.code !== "Ok" || !data.routes || !data.routes.length) throw new Error("rota yok");
-      const r = data.routes[0];
+      const r = await Promise.any(attempts);
       const result = {
         coords: r.geometry.coordinates.map((c) => [c[1], c[0]]),
         distance: r.distance,
@@ -339,8 +357,7 @@
       routeCache[key] = result;
       return result;
     } catch (e) {
-      clearTimeout(timer);
-      return null; // çevrimdışı ya da servis erişilemez — çağıran taraf düz çizgiye düşer
+      return null; // her iki ayna da başarısız — çağıran taraf düz çizgiye düşer
     }
   }
 
