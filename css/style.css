@@ -85,7 +85,9 @@ button svg, button use, a svg{pointer-events:none;}
 
 /* ===== Splash ===== */
 #view-splash{
-  background:linear-gradient(160deg,var(--color-secondary) 0%,#0E1428 100%);
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(255,107,0,.16), transparent 55%),
+    linear-gradient(160deg,var(--color-secondary) 0%,#0E1428 100%);
   align-items:center; justify-content:center;
 }
 .splash-content{text-align:center; color:#fff; padding:24px;}
@@ -145,11 +147,12 @@ button svg, button use, a svg{pointer-events:none;}
 
 /* ===== Butonlar ===== */
 .btn-primary{
-  background:var(--color-primary); color:#fff; border:none; border-radius:var(--radius-md);
-  padding:14px 22px; font-weight:700; font-size:15px; box-shadow:0 3px 10px rgba(255,107,0,.22);
-  transition:transform .22s var(--ease-spring), background .25s var(--ease), box-shadow .25s var(--ease);
+  background:linear-gradient(155deg, #FF7A1A, var(--color-primary) 55%, var(--color-primary-dark));
+  color:#fff; border:none; border-radius:var(--radius-md);
+  padding:14px 22px; font-weight:700; font-size:15px; box-shadow:0 4px 14px rgba(255,107,0,.28);
+  transition:transform .22s var(--ease-spring), box-shadow .25s var(--ease), filter .25s var(--ease);
 }
-.btn-primary:active{transform:scale(.97); background:var(--color-primary-dark);}
+.btn-primary:active{transform:scale(.97); filter:brightness(.94);}
 .btn-big{width:100%; padding:16px; font-size:16px; border-radius:var(--radius-lg);}
 .btn-ghost{background:transparent; border:none; color:var(--color-text-muted); font-weight:600; padding:12px 16px;}
 .btn-danger-outline{
@@ -319,7 +322,10 @@ input[type=range]{width:100%; accent-color:var(--color-primary); height:6px;}
 .trip-hint{font-size:13px; color:var(--color-text-muted); margin:10px 0 0;}
 
 /* ===== Alarm ekranı ===== */
-.alarm-view{background:#1A2340; align-items:center; justify-content:center; z-index:60;}
+.alarm-view{
+  background:radial-gradient(120% 90% at 50% 20%, #232f56, #1A2340 60%);
+  align-items:center; justify-content:center; z-index:60;
+}
 .alarm-flash{position:absolute; inset:0; background:#FF6B00; opacity:0; transition:opacity .25s;}
 .alarm-flash.on{animation:alarmFlash .5s steps(1) infinite;}
 @keyframes alarmFlash{0%{opacity:0;}50%{opacity:1; background:#FF3B30;}100%{opacity:0;}}

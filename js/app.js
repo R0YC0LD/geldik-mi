@@ -616,7 +616,9 @@
   async function fetchNearbyLines(lat, lng) {
     const key = lat.toFixed(2) + "," + lng.toFixed(2);
     if (linesCache.key === key && linesCache.lines) return linesCache.lines;
-    const routeFilter = 'relation["route"~"^(subway|light_rail|tram)$"]';
+    // "train" dahil edildi: Marmaray gibi banliyö/şehir içi raylı hatlar
+    // OSM'de çoğunlukla route=train olarak etiketleniyor.
+    const routeFilter = 'relation["route"~"^(subway|light_rail|tram|train)$"]';
     const radius = await suggestedSearchRadius(lat, lng);
     const ql = `[out:json][timeout:20];(${routeFilter}(around:${radius},${lat},${lng}););out tags;`;
     const data = await overpassQuery(ql);
