@@ -5,11 +5,15 @@
   değiştirilemez, dağıtılamaz veya ticari amaçla kullanılamaz.
 */
 
-const CACHE_NAME = "geldikmi-cache-v1";
+// Sürümü her önemli güncellemede artır — eski önbellekler activate
+// aşamasında otomatik silinir, bu da HTML/JS arasında sürüm uyuşmazlığı
+// (stale index.html + yeni app.js gibi) yaşanmasını önler.
+const CACHE_NAME = "geldikmi-cache-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./css/style.css",
+  "./js/i18n.js",
   "./js/app.js",
   "./js/stops-data.js",
   "./manifest.webmanifest",
@@ -33,21 +37,21 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Yalnızca kendi kaynağımızdaki GET isteklerini önbellekten karşıla;
-// harita karoları / arama servisi gibi dış istekleri ağa bırak.
+// Uygulama kabuğu (HTML/CSS/JS) için AĞ ÖNCELİKLİ: kullanıcı çevrimiçiyken
+// her zaman en güncel sürümü alır; sadece ağ başarısız olursa (çevrimdışı)
+// önbelleğe düşer. Bu, eski HTML'in yeni JS ile çakışıp hata vermesini
+// (sürüm uyumsuzluğunu) engeller. Harita karoları/arama gibi dış
+// isteklere hiç dokunulmaz.
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET" || new URL(req.url).origin !== location.origin) return;
 
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.ok) caches.open(CACHE_NAME).then((c) => c.put(req, res.clone()));
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) caches.open(CACHE_NAME).then((c) => c.put(req, res.clone()));
+        return res;
+      })
+      .catch(() => caches.match(req))
   );
 });
