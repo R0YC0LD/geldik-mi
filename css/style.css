@@ -249,6 +249,7 @@ button svg, button use, a svg{pointer-events:none;}
 .star-btn{font-size:20px; color:var(--color-primary); background:var(--color-bg);}
 .star-btn.active{color:#F5B301;}
 .target-address{color:var(--color-text-muted); font-size:13px; margin:8px 2px 0;}
+.route-info{display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; color:var(--color-primary); margin:6px 2px 0;}
 .underground-hint{background:#FFF1E0; color:#8A4B00; font-size:12.5px; padding:8px 12px; border-radius:var(--radius-sm); margin-top:8px; display:flex; align-items:center; gap:7px;}
 :root[data-theme="dark"] .underground-hint{background:#3A2A10; color:#FFC98A;}
 
@@ -319,6 +320,7 @@ input[type=range]{width:100%; accent-color:var(--color-primary); height:6px;}
 .trip-target-name{color:var(--color-text-muted); font-weight:600; font-size:14px;}
 .trip-remaining{font-size:36px; font-weight:800; color:var(--color-primary); margin:2px 0;}
 .trip-eta{color:var(--color-text-muted); font-size:13px; min-height:18px;}
+.trip-route-info{color:var(--color-text-muted); font-size:11.5px; opacity:.8; margin-top:-4px;}
 .trip-hint{font-size:13px; color:var(--color-text-muted); margin:10px 0 0;}
 
 /* ===== Alarm ekranı ===== */

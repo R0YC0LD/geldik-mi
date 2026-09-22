@@ -137,6 +137,12 @@ yüklenmeden gerçekleşir.
   İstanbul'a özel bir sınırlama yoktur); uygulama açık haritayla başlar ve
   konum iznin varsa otomatik olarak senin bulunduğun yere uçar.
 - **Türkçe / İngilizce arayüz** — Ayarlar'dan dilini değiştirebilirsin.
+- **Gerçek rota çizimi:** Hedefini seçtiğinde, aranızda düz bir çizgi değil,
+  yol ağını takip eden **gerçek yürüme rotası** çizilir (OSRM üzerinden) —
+  gerçek mesafe ve tahmini süre ile birlikte. Rota servisine ulaşılamazsa
+  (çevrimdışıysan vb.) sessizce düz-çizgi tahminine döner; alarm tetikleme
+  mantığı buna hiçbir zaman bağlı değildir, her zaman doğrudan GPS
+  mesafesiyle çalışır.
 - **Yakındaki hatlar (hazır konumlar):** Konumuna yakın metro/tramvay
   hatlarını gerçek adları ve resmi renkleriyle listeler (OpenStreetMap'ten,
   dünyanın her yerinde); bir hatta dokunup durağını hazır listeden de
@@ -225,10 +231,14 @@ bunlar dürüstçe belirtilmelidir:
   ekran açma** gibi native işletim sistemi seviyesindeki davranışlar web'den
   yapılamaz; bunun yerine sekme öndeyken tam ekran yanıp sönme + Web Audio
   alarm sesi + titreşim + (izin verildiyse) tekrarlanan bildirimler kullanılır.
-- **Nominatim** (adres arama) istemci tarafından çağrılır; tarayıcı
-  güvenliği nedeniyle özel bir `User-Agent` başlığı ayarlanamaz. İstekler
-  istemci tarafında saniyede 1 ile sınırlanmıştır. Yoğun/ticari kullanımda
-  kendi sunucunuz üzerinden vekil (proxy) kullanmanız önerilir.
+- **Nominatim** (adres arama), **Overpass** (yakındaki hatlar/duraklar) ve
+  **OSRM** (yürüme rotası) — üçü de ücretsiz, herkese açık, topluluk destekli
+  servislerdir; tarayıcı güvenliği nedeniyle özel bir `User-Agent` başlığı
+  ayarlanamaz ve bu servisler zaman zaman yavaşlayabilir/yoğun olabilir
+  (uygulama bunu "Tekrar dene" düğmeleriyle ve sessiz düz-çizgi
+  yedekleriyle karşılar). Nominatim istekleri istemci tarafında saniyede 1
+  ile sınırlanmıştır. Yoğun/ticari kullanımda kendi sunucunuz üzerinden
+  vekil (proxy) kullanmanız önerilir.
 - Yerel durak veritabanı (`js/stops-data.js`) İstanbul için bir başlangıç
   setidir, tüm istasyonları içermez; bazı koordinatlar `verified:false` ile
   işaretlenmiştir. Bunun dışında **arama ve haritaya dokunma dünyanın her

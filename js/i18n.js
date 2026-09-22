@@ -130,6 +130,10 @@ const I18N = {
     stops_loading: "Yakındaki duraklar aranıyor…",
     stops_empty: "Yakınında otobüs/tramvay/metro durağı bulunamadı.",
     stops_need_location: "Yakın durakları görmek için önce konumuna izin vermen gerekiyor.",
+    route_loading: "Rota hesaplanıyor…",
+    route_walking: "Yürüme rotası",
+    route_unavailable: "Gerçek rota bulunamadı — düz çizgi tahmini gösteriliyor",
+    route_walking_short: "Yürüme",
   },
   en: {
     app_name: "Geldik Mi?",
@@ -254,6 +258,10 @@ const I18N = {
     stops_loading: "Looking for nearby stops…",
     stops_empty: "No bus/tram/metro stop found near you.",
     stops_need_location: "You need to allow location access first to see nearby stops.",
+    route_loading: "Calculating route…",
+    route_walking: "Walking route",
+    route_unavailable: "Couldn't find a real route — showing a straight-line estimate",
+    route_walking_short: "Walking",
   },
 };
 

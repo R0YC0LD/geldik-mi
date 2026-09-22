@@ -304,9 +304,55 @@
   });
 
   /* =========================================================
+     GERÇEK ROTA (OSRM) — moovit benzeri: düz çizgi yerine gerçek
+     yürüme rotası. Çevrimdışı/erişilemezse sessizce düz çizgiye
+     düşer (fallback); alarm tetikleme mantığı buna hiç bağlı değil,
+     her zaman fiziksel (haversine) mesafeyle çalışmaya devam eder.
+  ========================================================= */
+  const OSRM_URL = "https://router.project-osrm.org/route/v1/foot/";
+  const routeCache = {};
+
+  function routeCacheKey(lat1, lng1, lat2, lng2) {
+    return lat1.toFixed(4) + "," + lng1.toFixed(4) + "," + lat2.toFixed(4) + "," + lng2.toFixed(4);
+  }
+
+  async function fetchWalkingRoute(lat1, lng1, lat2, lng2) {
+    const key = routeCacheKey(lat1, lng1, lat2, lng2);
+    const cached = routeCache[key];
+    if (cached && Date.now() - cached.ts < 90000) return cached;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const url = `${OSRM_URL}${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error("osrm http " + res.status);
+      const data = await res.json();
+      if (data.code !== "Ok" || !data.routes || !data.routes.length) throw new Error("rota yok");
+      const r = data.routes[0];
+      const result = {
+        coords: r.geometry.coordinates.map((c) => [c[1], c[0]]),
+        distance: r.distance,
+        duration: r.duration,
+        ts: Date.now(),
+      };
+      routeCache[key] = result;
+      return result;
+    } catch (e) {
+      clearTimeout(timer);
+      return null; // çevrimdışı ya da servis erişilemez — çağıran taraf düz çizgiye düşer
+    }
+  }
+
+  function drawRouteOrFallback(targetMapObj, fromLatLng, toLatLng, existingLine, color) {
+    if (existingLine) targetMapObj.removeLayer(existingLine);
+    return L.polyline([fromLatLng, toLatLng], { color, weight: 3, dashArray: "6 6", opacity: 0.7 }).addTo(targetMapObj);
+  }
+
+  /* =========================================================
      HARİTA
   ========================================================= */
-  let map, tripMap, userMarker, targetMarker, targetCircle, tripLine;
+  let map, tripMap, userMarker, targetMarker, targetCircle, tripLine, previewRouteLine;
   let currentTarget = null; // {lat,lng,name,address,underground}
   let lastNominatimCall = 0;
 
@@ -389,6 +435,7 @@
         currentTarget.address = null;
         reverseGeocode(ll.lat, ll.lng);
         updateCircle();
+        updatePreviewRoute();
       });
     } else {
       targetMarker.setLatLng([lat, lng]);
@@ -396,8 +443,36 @@
     map.panTo([lat, lng]);
     openTargetSheet();
     updateCircle();
+    updatePreviewRoute();
     if (!currentTarget.address) reverseGeocode(lat, lng);
     document.getElementById("target-name").placeholder = currentTarget.name || t("target_name_placeholder");
+  }
+
+  let previewRouteToken = 0;
+  async function updatePreviewRoute() {
+    const myToken = ++previewRouteToken;
+    const routeInfoEl = document.getElementById("route-info");
+    if (!userMarker || !currentTarget) {
+      if (previewRouteLine) { map.removeLayer(previewRouteLine); previewRouteLine = null; }
+      routeInfoEl.classList.add("hidden");
+      return;
+    }
+    const u = userMarker.getLatLng();
+    const target = currentTarget;
+    routeInfoEl.classList.remove("hidden");
+    routeInfoEl.innerHTML = `<svg width="14" height="14"><use href="#i-map"/></svg> ${t("route_loading")}`;
+
+    const route = await fetchWalkingRoute(u.lat, u.lng, target.lat, target.lng);
+    if (myToken !== previewRouteToken || !currentTarget || currentTarget !== target) return; // kullanıcı bu sırada hedefi değiştirmiş/kapatmış olabilir
+    if (previewRouteLine) { map.removeLayer(previewRouteLine); previewRouteLine = null; }
+    if (route) {
+      previewRouteLine = L.polyline(route.coords, { color: "#FF6B00", weight: 4, opacity: 0.85 }).addTo(map);
+      routeInfoEl.innerHTML = `<svg width="14" height="14"><use href="#i-map"/></svg> ${t("route_walking")}: ${formatDistance(route.distance)} · ${formatDuration(route.duration)}`;
+    } else {
+      previewRouteLine = drawRouteOrFallback(map, [u.lat, u.lng], [target.lat, target.lng], null, "#8A93A6");
+      routeInfoEl.innerHTML = `<svg width="14" height="14"><use href="#i-signal"/></svg> ${t("route_unavailable")}`;
+    }
+    previewRouteLine.bringToBack();
   }
 
   async function reverseGeocode(lat, lng) {
@@ -1004,12 +1079,14 @@
       insideStreak: 0, minDistance: Infinity, distanceHistory: [],
       alarmFired: false, snoozeUntil: 0,
       speed: 0, lastFix: null,
+      routeAnchor: null, routeDistance: null, routeToken: 0,
     };
     showView("trip");
     ensureTripMap();
     setTimeout(() => tripMap && tripMap.invalidateSize(), 60);
     document.getElementById("trip-target-name").textContent = dest.name;
     document.getElementById("trip-signal-banner").classList.add("hidden");
+    document.getElementById("trip-route-info").classList.add("hidden");
     requestWakeLock();
 
     watchId = navigator.geolocation.watchPosition(onPosition, onPositionError, {
@@ -1032,6 +1109,16 @@
     document.getElementById("trip-remaining").textContent =
       formatDistance(remaining) + " " + t("trip_remaining_suffix") + " " + t("trip_estimated");
 
+    // Gerçek konum yokken haritadaki nokta da tamamen donmuş kalmasın:
+    // son bilinen konumdan hedefe doğru, tahmini mesafeye göre düz bir
+    // çizgi üzerinde yaklaşık ilerlet (dürüstçe "tahmini" — kesin değil).
+    if (userMarkerTrip && trip.lastFix.distance > 0) {
+      const ratio = Math.min(1, Math.max(0, (trip.lastFix.distance - estDistance) / trip.lastFix.distance));
+      const estLat = trip.lastFix.lat + (trip.dest.lat - trip.lastFix.lat) * ratio;
+      const estLng = trip.lastFix.lng + (trip.dest.lng - trip.lastFix.lng) * ratio;
+      userMarkerTrip.setLatLng([estLat, estLng]);
+    }
+
     if (estDistance < trip.minDistance) trip.minDistance = estDistance;
 
     if (!trip.alarmFired && estDistance <= trip.dest.radius && Date.now() > trip.snoozeUntil) {
@@ -1049,6 +1136,28 @@
     L.circle([trip.dest.lat, trip.dest.lng], {
       radius: trip.dest.radius, color: "#FF6B00", weight: 2, fillColor: "#FF6B00", fillOpacity: 0.18,
     }).addTo(tripMap);
+  }
+
+  async function updateTripRoute(lat, lng) {
+    if (!trip) return;
+    const myToken = ++trip.routeToken;
+    const dest = trip.dest;
+    const route = await fetchWalkingRoute(lat, lng, dest.lat, dest.lng);
+    if (!trip || trip.routeToken !== myToken || trip.dest !== dest) return; // yolculuk bu sırada bitmiş/değişmiş olabilir
+    if (tripLine) tripMap.removeLayer(tripLine);
+    const routeInfoEl = document.getElementById("trip-route-info");
+    if (route) {
+      tripLine = L.polyline(route.coords, { color: "#1A2340", weight: 3, opacity: 0.85 }).addTo(tripMap);
+      trip.routeDistance = route.distance;
+      routeInfoEl.textContent = t("route_walking_short") + ": " + formatDistance(route.distance);
+      routeInfoEl.classList.remove("hidden");
+    } else {
+      tripLine = drawRouteOrFallback(tripMap, [lat, lng], [dest.lat, dest.lng], null, "#1A2340");
+      trip.routeDistance = null;
+      routeInfoEl.textContent = t("route_unavailable");
+      routeInfoEl.classList.remove("hidden");
+    }
+    tripMap.fitBounds(tripLine.getBounds(), { padding: [60, 60] });
   }
 
   function checkSignal() {
@@ -1082,12 +1191,23 @@
     } else {
       userMarkerTrip.setLatLng([latitude, longitude]);
     }
-    if (tripLine) tripMap.removeLayer(tripLine);
-    tripLine = L.polyline([[latitude, longitude], [trip.dest.lat, trip.dest.lng]], { color: "#1A2340", weight: 2, dashArray: "6 6" }).addTo(tripMap);
-    tripMap.fitBounds(tripLine.getBounds(), { padding: [60, 60] });
+    // Gerçek rota: her GPS okumasında değil, ~120m'den fazla hareket
+    // edildiğinde yeniden hesaplanır (gereksiz istek yapmamak için).
+    // İlk çizim anında düz çizgiyle yapılır, rota gelince yerini alır.
+    const needsRoute = !trip.routeAnchor || haversine(trip.routeAnchor.lat, trip.routeAnchor.lng, latitude, longitude) > 120;
+    if (needsRoute) {
+      trip.routeAnchor = { lat: latitude, lng: longitude };
+      if (!tripLine) {
+        tripLine = drawRouteOrFallback(tripMap, [latitude, longitude], [trip.dest.lat, trip.dest.lng], null, "#1A2340");
+        tripMap.fitBounds(tripLine.getBounds(), { padding: [60, 60] });
+      }
+      updateTripRoute(latitude, longitude);
+    } else if (tripLine) {
+      tripMap.fitBounds(L.latLngBounds([latitude, longitude], [trip.dest.lat, trip.dest.lng]), { padding: [60, 60] });
+    }
 
     document.getElementById("trip-remaining").textContent = formatDistance(remaining) + " " + t("trip_remaining_suffix");
-    trip.lastFix = { t: Date.now(), distance };
+    trip.lastFix = { t: Date.now(), distance, lat: latitude, lng: longitude };
 
     // Son 1 dakikalık hıza göre kabaca ETA (çok düşükse gösterme); aynı hız
     // tünel/yeraltı sinyal kesintisinde tahmini konum için de kullanılır.
