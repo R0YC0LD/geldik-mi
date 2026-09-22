@@ -125,6 +125,11 @@ const I18N = {
     lines_stops_count: "{count} durak",
     tour_lines: "Buradan konumuna yakın metro/tramvay hatlarını ve duraklarını listeleyip hazır seçebilirsin.",
     retry: "Tekrar dene",
+    lines_tab_lines: "Hatlar",
+    lines_tab_stops: "Yakın Duraklar",
+    stops_loading: "Yakındaki duraklar aranıyor…",
+    stops_empty: "Yakınında otobüs/tramvay/metro durağı bulunamadı.",
+    stops_need_location: "Yakın durakları görmek için önce konumuna izin vermen gerekiyor.",
   },
   en: {
     app_name: "Geldik Mi?",
@@ -244,6 +249,11 @@ const I18N = {
     lines_stops_count: "{count} stops",
     tour_lines: "From here you can browse metro/tram lines and stops near you, and pick one ready-made.",
     retry: "Try again",
+    lines_tab_lines: "Lines",
+    lines_tab_stops: "Nearby Stops",
+    stops_loading: "Looking for nearby stops…",
+    stops_empty: "No bus/tram/metro stop found near you.",
+    stops_need_location: "You need to allow location access first to see nearby stops.",
   },
 };
 

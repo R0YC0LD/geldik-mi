@@ -667,14 +667,22 @@
   const linesOverlay = document.getElementById("lines-overlay");
   const linesContent = document.getElementById("lines-content");
   const linesBackBtn = document.getElementById("btn-lines-back");
+  const linesTabs = document.getElementById("lines-tabs");
+  let linesActiveTab = "lines";
+
+  function renderActiveTab() {
+    if (linesActiveTab === "stops") loadStopsList();
+    else loadLinesList();
+  }
 
   function openLinesSheet() {
     linesSheet.classList.remove("hidden");
     linesOverlay.classList.remove("hidden");
     linesBackBtn.classList.add("hidden");
+    linesTabs.classList.remove("hidden");
     document.getElementById("lines-title").textContent = t("lines_title");
     document.getElementById("lines-hint").classList.remove("hidden");
-    loadLinesList();
+    renderActiveTab();
   }
   function closeLinesSheet() {
     linesSheet.classList.add("hidden");
@@ -683,6 +691,19 @@
   document.getElementById("btn-lines").addEventListener("click", openLinesSheet);
   document.getElementById("btn-lines-close").addEventListener("click", closeLinesSheet);
   linesOverlay.addEventListener("click", closeLinesSheet);
+
+  document.getElementById("tab-lines").addEventListener("click", () => {
+    linesActiveTab = "lines";
+    document.getElementById("tab-lines").classList.add("active");
+    document.getElementById("tab-stops").classList.remove("active");
+    renderActiveTab();
+  });
+  document.getElementById("tab-stops").addEventListener("click", () => {
+    linesActiveTab = "stops";
+    document.getElementById("tab-stops").classList.add("active");
+    document.getElementById("tab-lines").classList.remove("active");
+    renderActiveTab();
+  });
 
   function getCurrentPositionAsync() {
     return new Promise((resolve) => {
@@ -742,6 +763,7 @@
 
   async function openLineStops(line) {
     linesBackBtn.classList.remove("hidden");
+    linesTabs.classList.add("hidden");
     document.getElementById("lines-title").textContent = line.name;
     document.getElementById("lines-hint").classList.add("hidden");
     linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div>${t("lines_loading")}</div>`;
@@ -768,7 +790,87 @@
       linesContent.innerHTML = `<p class="lines-empty">${t("lines_error")}</p>`;
     }
   }
-  linesBackBtn.addEventListener("click", openLinesSheet);
+  linesBackBtn.addEventListener("click", () => {
+    linesBackBtn.classList.add("hidden");
+    linesTabs.classList.remove("hidden");
+    document.getElementById("lines-title").textContent = t("lines_title");
+    document.getElementById("lines-hint").classList.remove("hidden");
+    renderActiveTab();
+  });
+
+  /* ---- Yakın duraklar (tek tek, hat bağımsız) ---- */
+  const stopsCacheByCoord = { key: null, stops: null };
+
+  async function fetchNearbyStops(lat, lng) {
+    const key = lat.toFixed(3) + "," + lng.toFixed(3);
+    if (stopsCacheByCoord.key === key && stopsCacheByCoord.stops) return stopsCacheByCoord.stops;
+    const filter =
+      '(node["highway"="bus_stop"](around:R,LAT,LNG);' +
+      'node["public_transport"="stop_position"](around:R,LAT,LNG);' +
+      'node["railway"="tram_stop"](around:R,LAT,LNG);' +
+      'node["railway"="station"](around:R,LAT,LNG);' +
+      'node["railway"="halt"](around:R,LAT,LNG);)';
+    let elements = [];
+    for (const radius of [1500, 3500]) {
+      const ql = `[out:json][timeout:20];${filter.replace(/R/g, radius).replace(/LAT/g, lat).replace(/LNG/g, lng)};out;`;
+      const data = await overpassQuery(ql);
+      elements = data.elements || [];
+      if (elements.length) break;
+    }
+    const seen = new Set();
+    const stops = [];
+    for (const el of elements) {
+      const name = (el.tags && el.tags.name) || null;
+      if (!name) continue; // isimsiz/anonim noktaları listeleme
+      const coordKey = el.lat.toFixed(4) + "," + el.lon.toFixed(4);
+      const dedupeKey = normalizeTr(name) + "|" + coordKey;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      stops.push({ name, lat: el.lat, lng: el.lon, dist: haversine(lat, lng, el.lat, el.lon) });
+    }
+    stops.sort((a, b) => a.dist - b.dist);
+    const top = stops.slice(0, 40);
+    stopsCacheByCoord.key = key;
+    stopsCacheByCoord.stops = top;
+    return top;
+  }
+
+  async function loadStopsList() {
+    linesContent.innerHTML = `<div class="lines-loading"><div class="lines-spinner"></div><span id="lines-loading-text">${t("stops_loading")}</span></div>`;
+    let pos = lastKnownLatLng();
+    if (!pos) pos = await getCurrentPositionAsync();
+    if (!pos) {
+      linesContent.innerHTML = `<p class="lines-empty">${t("stops_need_location")}</p>`;
+      return;
+    }
+    try {
+      const stops = await fetchNearbyStops(pos.lat, pos.lng);
+      if (!stops.length) {
+        linesContent.innerHTML = linesRetryHtml(t("stops_empty"));
+        document.getElementById("btn-lines-retry").addEventListener("click", () => { stopsCacheByCoord.key = null; loadStopsList(); });
+        return;
+      }
+      linesContent.innerHTML = "";
+      stops.forEach((s) => {
+        const row = document.createElement("div");
+        row.className = "line-stop-row";
+        row.innerHTML =
+          `<span class="line-stop-dot" style="background:var(--color-primary)"></span>` +
+          `<span class="line-stop-name">${s.name}</span>` +
+          `<span class="stop-distance">${formatDistance(s.dist)}</span>`;
+        row.addEventListener("click", () => {
+          closeLinesSheet();
+          ensureMap();
+          map.setView([s.lat, s.lng], 16);
+          placeTarget(s.lat, s.lng, { name: s.name, address: s.name });
+        });
+        linesContent.appendChild(row);
+      });
+    } catch (e) {
+      linesContent.innerHTML = linesRetryHtml(t("lines_error"));
+      document.getElementById("btn-lines-retry").addEventListener("click", () => { stopsCacheByCoord.key = null; loadStopsList(); });
+    }
+  }
 
   /* =========================================================
      HEDEF AYAR PANELİ (bottom sheet)
